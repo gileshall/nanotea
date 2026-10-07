@@ -1,0 +1,32 @@
+# Merged over the shipped compose.yaml by e2e/run.py: the run's own image, caps and caches, and its CA, so the
+# service trusts the run's push receiver (push.test, the driver on the host's side of the network).
+services:
+  nanotea:
+    image: nanotea-ci-service:${NANOTEA_CI_FLAVOR:?}
+    pull_policy: never
+    restart: "no"
+    cpus: ${NANOTEA_CI_CPUS:?}
+    mem_limit: ${NANOTEA_CI_MEM:?}
+    cpu_shares: 256
+    environment:
+      REQUESTS_CA_BUNDLE: /certs/ca.crt
+    volumes:
+      - ${NANOTEA_CI_WORK:?}/certs/ca.crt:/certs/ca.crt:ro
+    extra_hosts:
+      - "push.test:172.30.77.1"
+
+  kokoro:
+    restart: "no"
+    cpus: ${NANOTEA_CI_KOKORO_CPUS:?}
+    mem_limit: 3g
+    cpu_shares: 256
+    # Running is not ready: it loads its model first, and the service asks it for voices when an agent joins.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8880/v1/audio/voices"]
+      interval: 3s
+      retries: 100
+
+volumes:
+  nanotea-cache:
+    name: nanotea-ci-cache-service
+    external: true

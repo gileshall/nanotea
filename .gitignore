@@ -1,0 +1,7 @@
+.venv/
+data/
+logs/
+__pycache__/
+docker-config/
+e2e-out/
+docs/assets/board.mp4

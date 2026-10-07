@@ -1,0 +1,8 @@
+# Only what the image build reads.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!nanotea
+**/__pycache__

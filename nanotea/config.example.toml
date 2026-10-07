@@ -1,0 +1,172 @@
+# nanotea's config. Every table and key the service takes is here: a live line is what a new install uses, a
+# commented one is an option you can turn on. Paths are relative to this file's directory. An unknown key or table,
+# a value of the wrong type, or a missing required key stops the service and names it. The service reads this file
+# once, at start: restart it after an edit. Settings > Configuration in the app shows what it is running with.
+# What the app itself keeps (your switches, theme, prompts) is in data_dir, and wins over the starting values here.
+
+# --- The service ---------------------------------------------------------------------------------------------------
+host = "127.0.0.1"        # where it listens. "0.0.0.0" only if the proxy reaches the service from another host or container
+port = 7447               # the port it listens on; agents on this machine use it too
+# The HTTPS address browsers use: scheme and host, lower case, no default port. A reverse proxy holds the
+# certificate and forwards here (docs/running.md has every way; deploy/traefik is an example).
+public_url = "https://nanotea.example.com"
+trusted_proxies = ["127.0.0.1"]   # the proxies whose X-Forwarded headers are believed; anything else is "not proxied"
+data_dir = "data"         # everything the service records: messages, recordings, settings, prompts, keys
+# Secrets: read at start, never copied or shown. Keys the config needs, such as SPEECHIFY_API_KEY, go here.
+env_file = "~/.env"       # KEY=VALUE secrets, e.g. SPEECHIFY_API_KEY
+# Directories for plugins named "module:Class" (docs/plugins.md). `nanotea plugins` lists what is available.
+# plugin_path = ["plugins"]
+
+# --- The app -------------------------------------------------------------------------------------------------------
+[app]
+name = "Nanotea"          # what the app calls itself: its title, home screen name and leaf
+owner = "Alex"            # who the messages are for: shown in the app, addressed by the rewriter and by agents
+# The channels a new install starts with: name = "topic". You can make more in the app.
+channels = { general = "Questions, approvals, announcements" }
+# The sidebar's groups on a new install: agents (by --from name, case aside, or a direct line's name) in each
+# group's order. Agents in no group go under "Other". Kept in data/groups.json after the first start.
+groups = [
+  # { name = "Builders", members = ["builder", "tester"] },
+]
+
+# --- Look ----------------------------------------------------------------------------------------------------------
+[theme]
+# How the app looks on a new install; after that, Settings > Look (kept in data/theme.json).
+use = "sencha"            # sencha, oolong, earl grey, rooibos, or one of yours below
+appearance = "auto"       # auto (match the device), light or dark
+# Your own theme: a built-in to start from, and the colors to change in its light and dark sides. Colors:
+# bg fg muted faint line hover card chip accent accent_fg accent_soft side side_fg side_mute side_hover side_on
+# red amber green leaf vein (leaf and vein color the leaf marks).
+# [theme.custom.lapsang]
+# base = "oolong"
+# light = { accent = "#7a3b1c", side = "#2a1810" }
+# dark = { accent = "#d08a5c" }
+
+# --- Controls: what agents may put in front of you to tap ----------------------------------------------------------
+[control]
+# On a message or pinned to an agent's line (docs/plugins.md). [] turns controls off. A control with settings of
+# its own takes them in [control.<name>]; the built-in two have none.
+use = ["choice", "checklist"]
+
+# --- The rewriter: how a message becomes what the voice reads ------------------------------------------------------
+[rewrite]
+# "identity": the voice reads the original text, less its markdown. "command": any LLM command line rewrites it
+# for listening. "claude": Claude Code's claude -p does. The instructions the last two send are on the Prompts
+# page, where you can change them. Required; anything else stops the service at startup.
+backend = "identity"
+
+# The request comes on stdin; stdout must be one JSON object {"title": ..., "script": ...}.
+# {system}: the instructions as text, {system_file}: the same in a file, {schema_file}: the reply's JSON schema.
+[rewrite.command]
+argv = ["llm", "-m", "gpt-5-mini", "-s", "{system}"]   # the program and its arguments; the program must exist at start
+timeout_s = 180                                         # seconds before it is killed and the message fails
+
+# Headless Claude Code on the local login: no tools, no MCP servers, no hooks, a neutral directory.
+[rewrite.claude]
+command = "claude"        # the program: on the service's PATH, or a full path
+model = "claude-opus-5"   # as claude --model takes it
+effort = "low"            # as claude --effort takes it: low, medium, high
+timeout_s = 180
+
+# --- The voice: what reads a message aloud when you tap play -------------------------------------------------------
+[tts]
+# "command": a local engine (below; macOS say to start). "speechify": the Speechify API (SPEECHIFY_API_KEY in
+# env_file). "kokoro": the Kokoro model run inside the service (nanotea kokoro download first). "kokoro-server":
+# a Kokoro-FastAPI server you run. Required.
+backend = "command"
+
+# The Speechify API. Only voices that support the model are offered. Needs SPEECHIFY_API_KEY in env_file.
+[tts.speechify]
+model = "simba-3.2"       # required
+timeout_s = 180           # required: seconds before a request fails
+
+# The Kokoro model in the service: uv sync --extra kokoro, then nanotea kokoro download. Every key optional.
+# [tts.kokoro]
+# model_dir = "kokoro"    # where the model files are; default ~/.cache/nanotea/kokoro; relative to this file's directory
+# format = "float32"      # float32, or pcm24; both lossless wav at the model's 24 kHz
+# speed = 1.0             # 0.5 to 2.0
+
+# A Kokoro-FastAPI server. Only url is required; the rest are the defaults. The voices are the server's.
+# [tts.kokoro-server]
+# url = "http://127.0.0.1:8880"
+# model = "kokoro"
+# format = "wav"          # wav, flac, mp3, opus or aac; wav and flac are lossless
+# speed = 1.0             # 0.25 to 4.0
+# timeout_s = 600
+
+# Any local engine: {text_file} holds the script, {out} is where the audio goes, {voice} the sender's voice.
+[tts.command]
+argv = ["say", "-v", "{voice}", "-f", "{text_file}", "-o", "{out}"]   # the program must exist at start
+ext = "m4a"                                                           # the file extension the program writes
+voices = ["Samantha", "Daniel", "Karen", "Moira"]                     # what senders may pick, as {voice}
+timeout_s = 600
+
+# --- Audio: joined tracks and uploads ------------------------------------------------------------------------------
+[audio]
+# A message's speech joined with its clips, or the owner's takes sent together. Every key optional. Clips and
+# takes sent alone are never re-encoded.
+# format = "mp3"          # mp3, aac, flac, or wav (24-bit)
+# kbps = 192              # mp3 and aac, 32 to 320
+# rate = 48000            # 44100, 48000, 88200, 96000
+# max_upload_mb = 1024    # the largest file you can attach; the proxy must allow it too
+
+# --- The transcriber: what turns your recordings into words --------------------------------------------------------
+[stt]
+backend = "command"       # required; "command" is the only built-in
+
+# Prints the transcript of {audio_file}. transcribe.sh's arguments: a python with openai-whisper installed, the
+# model, the file. {package}: where nanotea is installed.
+[stt.command]
+argv = ["sh", "{package}/transcribe.sh", "python3", "large-v3-turbo", "{audio_file}"]   # the program must exist at start
+timeout_s = 600           # seconds before it is killed and the transcript fails
+
+# --- Notifications -------------------------------------------------------------------------------------------------
+[notify]
+now = ["push"]            # when a message is ready: the web app's notifications
+escalate = []             # off; ["imessage"] texts once if a message goes this long without a response
+escalate_after_min = 30   # a question needs an answer; anything else needs opening
+
+# Web Push to every browser that turned on notifications. Needs an https public_url, or this machine's browser.
+[notify.push]
+subject = "https://nanotea.example.com"   # the contact push services see: mailto:you@example.com, or https://host
+                                          # with no port or path
+
+# Texts through Messages.app on this machine (macOS). Only runs if "imessage" is in escalate or now.
+[notify.imessage]
+to = "+10000000000"  # phone number or Apple ID email
+
+# --- Bang commands: the !command you type on an agent's line -------------------------------------------------------
+[bang]
+# Limits only; whether they are on at all is a switch in Settings, off by default (docs/agents.md). Every key
+# optional, each a whole number.
+# timeout_s = 120         # a running command is killed, with everything it started, after this many seconds (1 to 3600)
+# expire_s = 60           # a command no session picks up in this many seconds is "not run" and never runs (5 to 600)
+# output_kb = 30          # per stream (stdout, stderr), what the agent and the page get; the first and last half (1 to 1024)
+# keep_mb = 16            # per stream, how much is kept whole on disk under data/bang/<id>/ (1 to 512)
+
+# --- Your switches' starting values --------------------------------------------------------------------------------
+[settings]
+# What the switches on the Settings page start as on a new install. After that, what you change there (kept in
+# data/settings.json) wins. A key or value that is not one of these stops the service. Every key optional.
+# rules = true               # standing rules reach every session
+# wake_filter = true         # wait returns at once only for your words, answers and @mentions
+# batch_events = true        # events that arrive together are handed over together
+# strict_sop = true          # no acknowledgements or recaps; decisions through ask
+# one_session = true         # a second live session under one name is refused
+# held = true                # show an agent stuck at a permission prompt
+# held_push_min = 0          # notify after this many minutes held; 0 never (0 to 1440)
+# agent_messages = "off"     # off, shown, or hidden
+# bang = false               # the !command on an agent's line
+# thread_view = "linear"     # replies: linear (in time order) or grouped (under their thread)
+# read_code = "name"         # reading aloud, code blocks: name, skip or read
+# read_tables = "rows"       # tables: rows, labelled or name
+# read_links = "read"        # web addresses: read, site or skip
+# read_paths = "read"        # file paths: read or file
+# read_hashes = "read"       # hashes and ids: read or skip
+# read_symbols = false       # say arrows and abbreviations as words
+# read_max_words = 0         # stop after about this many words; 0 reads it all (0 to 20000)
+# board_managers = []        # agents that may arrange the board
+# config_programs = false    # Settings > Configuration may change argv, plugins and data paths; on: nanotea config programs on
+# tools = { react = true, status = true, typing = true, channels = true, board = true, history = true, controls = true, thread = true }
+
+# [phone]: live calls, not built yet. docs/voice-calls.md

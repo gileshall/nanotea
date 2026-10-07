@@ -1,0 +1,31 @@
+# Traefik terminating TLS with the run's certificate, then nginx with deploy/traefik/nginx.conf, as
+# deploy/traefik has it, in front of the service. nginx has a fixed address: the service trusts it.
+services:
+  traefik:
+    image: traefik:v3.5
+    restart: "no"
+    cpus: 0.5
+    mem_limit: 256m
+    cpu_shares: 256
+    command:
+      - --entrypoints.https.address=:443
+      - --providers.file.filename=/etc/traefik/dynamic.yaml
+      - --log.level=INFO
+      - --accesslog=true
+    ports:
+      - "127.0.0.1:27443:443"
+    volumes:
+      - ${NANOTEA_CI_WORK:?}/traefik.yaml:/etc/traefik/dynamic.yaml:ro
+      - ${NANOTEA_CI_WORK:?}/certs:/certs:ro
+
+  pub:
+    image: nginx:1.29-alpine
+    restart: "no"
+    cpus: 0.5
+    mem_limit: 256m
+    cpu_shares: 256
+    volumes:
+      - ${NANOTEA_CI_WORK:?}/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      default:
+        ipv4_address: 172.30.77.10

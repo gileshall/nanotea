@@ -1,0 +1,74 @@
+# nanotea in Docker. docs/service.md#docker
+#
+#   mkdir docker-config && cp docs/docker.config.toml docker-config/config.toml && touch docker-config/env
+#   docker compose up -d --build
+#   docker compose --profile kokoro up -d --build     # with a local Kokoro voice
+#
+# Settings, all optional, from the shell or a .env file beside this one:
+#   NANOTEA_PORT        the port on the host's loopback, and `port` in the config (default 7447)
+#   NANOTEA_DATA        an absolute host path to keep the data in, mounted at the same path inside; set the
+#                       config's data_dir to it. Unset: a named volume at /data
+#   NANOTEA_CONFIG_DIR  the directory holding config.toml and env (default ./docker-config)
+#   NANOTEA_UID/GID     who the service runs as, so a NANOTEA_DATA directory is writable (default 1000)
+#   NANOTEA_WHISPER     0 to leave openai-whisper out of the image (default 1)
+#   NANOTEA_KOKORO      1 to add the package the in-process kokoro voice needs (default 0)
+
+name: nanotea
+
+services:
+  nanotea:
+    image: nanotea:local
+    pull_policy: build
+    build:
+      context: .
+      args:
+        WHISPER: ${NANOTEA_WHISPER:-1}
+        KOKORO: ${NANOTEA_KOKORO:-0}
+    restart: unless-stopped
+    user: "${NANOTEA_UID:-1000}:${NANOTEA_GID:-1000}"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # Published to this host's loopback only. A proxy on this host forwards here; to serve another machine,
+    # change the address, and read docs/service.md#docker first.
+    ports:
+      - "127.0.0.1:${NANOTEA_PORT:-7447}:${NANOTEA_PORT:-7447}"
+    volumes:
+      - ${NANOTEA_DATA:-nanotea-data}:${NANOTEA_DATA:-/data}
+      - ${NANOTEA_CONFIG_DIR:-./docker-config}:/config:ro
+      - nanotea-cache:/cache
+
+  # Opt-in text to speech: backend = "kokoro-server", [tts.kokoro-server] url = "http://kokoro:8880".
+  # Pinned to a released tag.
+  kokoro:
+    profiles: [kokoro]
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0
+    restart: unless-stopped
+
+  # The same on an NVIDIA GPU (needs the NVIDIA container toolkit): --profile kokoro-gpu, not both.
+  kokoro-gpu:
+    profiles: [kokoro-gpu]
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.9.0
+    restart: unless-stopped
+    networks:
+      default:
+        aliases: [kokoro]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+# A fixed subnet, so the gateway address (what a proxy on this host looks like from inside) is known: it is
+# trusted_proxies in the example config. Change both together if this range is taken.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.77.0/24
+          gateway: 172.30.77.1
+
+volumes:
+  nanotea-data:
+  nanotea-cache:

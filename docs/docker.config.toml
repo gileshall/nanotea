@@ -1,0 +1,52 @@
+# Config for the container: cp docs/docker.config.toml docker-config/config.toml, then edit. docs/service.md#docker
+# Mounted read-only at /config. Paths in it are relative to /config.
+host = "0.0.0.0"          # inside the container; compose publishes the port to this host's loopback only
+port = 7447              # NANOTEA_PORT in compose.yaml, and the port agents on this machine use
+public_url = "https://nanotea.example.com"   # the HTTPS address your phone uses
+trusted_proxies = ["172.30.77.1"]            # a proxy on this machine, as the container sees it (compose.yaml)
+data_dir = "/data"       # NANOTEA_DATA, if you set it
+env_file = "env"         # KEY=VALUE secrets beside this file; may be empty
+
+[app]
+name = "Nanotea"
+owner = "Alex"            # who the messages are for: shown in the app, addressed by the rewriter
+channels = { general = "Questions, approvals, announcements" }
+groups = []
+
+[theme]
+use = "sencha"
+appearance = "auto"
+
+[control]
+use = ["choice", "checklist"]
+
+[rewrite]
+backend = "identity"
+
+# Kokoro-FastAPI, from compose: docker compose --profile kokoro up -d (or --profile kokoro-gpu).
+# Voices are the server's; `nanotea plugins --check` lists how many it has. For the model inside the service
+# instead, build with NANOTEA_KOKORO=1, run `docker compose run --rm nanotea kokoro download`, and use
+# backend = "kokoro" (docs/plugins.md#the-two-kokoro-voices).
+[tts]
+backend = "kokoro-server"
+
+[tts.kokoro-server]
+url = "http://kokoro:8880"
+format = "wav"            # wav, flac, mp3, opus or aac; wav and flac are lossless
+
+# openai-whisper on CPU, in the image unless built with NANOTEA_WHISPER=0. Models download to the nanotea-cache
+# volume on first use; a bigger one (medium, large-v3-turbo) is slower on CPU, so raise timeout_s with it.
+[stt]
+backend = "command"
+
+[stt.command]
+argv = ["sh", "{package}/transcribe.sh", "/opt/whisper/bin/python", "small", "{audio_file}"]
+timeout_s = 900
+
+[notify]
+now = ["push"]
+escalate = []
+escalate_after_min = 30
+
+[notify.push]
+subject = "https://nanotea.example.com"   # VAPID contact the push services see
