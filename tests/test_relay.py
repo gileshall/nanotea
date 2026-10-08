@@ -7,6 +7,7 @@ import http.client
 import json
 import queue
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -152,3 +153,52 @@ class Relay(Case):
         out, err = rewake.communicate(timeout=30)
         self.assertEqual(rewake.returncode, 2, err)
         self.assertIn("1 message(s) from Robin waiting", err)
+
+    def begin(self, name):
+        """A relay with its session joined and a wait in flight."""
+        relay, lines, errors = self.start(name)
+        self.send(relay, {"id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}})
+        self.assertEqual(self.read(lines)["id"], 1)
+        self.send(relay, {"method": "notifications/initialized"})
+        self.send(relay, {"id": 2, "method": "tools/call", "params": {"name": "wait", "arguments": {"timeout_s": 120}}})
+        self.wait_for(lambda: any(f"of {name} opened" in x for x in self.log), f"{name}'s session to open")
+        time.sleep(1)
+        return relay, lines, errors
+
+    def closed(self, name):
+        self.wait_for(lambda: any(f"of {name} closed" in x for x in self.log), f"{name}'s session to close")
+
+    def test_closing_stdin_ends_a_wait(self):
+        relay, lines, errors = self.begin("Xan")
+        start = time.monotonic()
+        relay.stdin.close()
+        self.assertEqual(relay.wait(timeout=10), 0, errors)
+        self.assertLess(time.monotonic() - start, 5)
+        self.closed("Xan")
+        self.assertFalse(any("Fatal Python error" in e for e in errors), errors)
+
+    def test_a_stop_closes_the_session(self):
+        # As Claude Code stops a server: SIGINT, then SIGTERM 100 ms on if it hasn't exited.
+        relay, lines, errors = self.begin("Yul")
+        start = time.monotonic()
+        relay.send_signal(signal.SIGINT)
+        time.sleep(0.1)
+        relay.send_signal(signal.SIGTERM)
+        self.assertEqual(relay.wait(timeout=10), 0, errors)
+        self.assertLess(time.monotonic() - start, 5)
+        self.closed("Yul")
+        self.assertFalse(any("Fatal Python error" in e or "Traceback" in e for e in errors), errors)
+
+    def test_a_server_that_fails_at_start_ends_the_relay(self):
+        # With stdin held open, as a harness holds it: the thread reading it is still in a read at exit.
+        relay = subprocess.Popen([sys.executable, "-m", "nanotea", "mcp", "--wait-s", "0"], env=self.env,
+                                 cwd=self.tmp.name, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True)
+        self.addCleanup(relay.stdin.close)
+        self.assertEqual(relay.wait(timeout=30), 2)
+        err = relay.stderr.read()
+        relay.stdout.close()
+        relay.stderr.close()
+        self.assertIn("--wait-s must be 1 to", err)
+        self.assertNotIn("Fatal Python error", err)

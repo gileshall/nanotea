@@ -11,6 +11,7 @@ Standard library only, and kept small: a session keeps this process, and so this
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -59,7 +60,7 @@ class Relay:
     def spawn(self) -> None:
         self.child = subprocess.Popen([sys.executable, "-m", "nanotea.mcp_server", *self.argv],
                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                      env={**os.environ, STATE_ENV: self.state})
+                                      env={**os.environ, STATE_ENV: self.state}, start_new_session=True)
         self.reader = threading.Thread(target=self.from_child, args=(self.child,), daemon=True)
         self.reader.start()
 
@@ -100,11 +101,7 @@ class Relay:
                     if msg is None or "id" not in msg or "method" not in msg:
                         say(f"the server exited before this reached it: {line[:200]!r}")
         with self.gate:
-            self.closing = True
-            try:
-                self.child.stdin.close()
-            except BrokenPipeError:
-                pass
+            self.shut()
 
     def note(self, msg: dict | None, line: bytes) -> bool:
         """Keeps what a handover needs from the harness's line; False if the line has nowhere to go."""
@@ -151,7 +148,24 @@ class Relay:
         self.emit(json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}).encode())
         say("the server was upgraded; the session goes on")
 
+    def shut(self) -> None:
+        """Ends the session: the child sees its stdin close, closes the session and exits, and so does the relay."""
+        self.closing = True
+        try:
+            self.child.stdin.close()
+        except BrokenPipeError:
+            pass  # the child has gone already; its exit ends the relay
+
+    def stop(self, signum, frame) -> None:
+        """The harness stops the relay (Claude Code: SIGINT, then SIGTERM 100 ms on). Not passed on as a signal:
+        an interrupted server waits on its thread reading stdin, which only an end of stdin frees. The child has
+        its own process group, so a signal to the harness's group doesn't reach it either."""
+        if self.child is not None:
+            self.shut()
+
     def run(self) -> int:
+        signal.signal(signal.SIGINT, self.stop)
+        signal.signal(signal.SIGTERM, self.stop)
         self.spawn()
         threading.Thread(target=self.from_harness, daemon=True).start()
         while True:
@@ -167,6 +181,8 @@ class Relay:
                         f"server (Claude Code: /mcp)")
                     self.child.kill()
                     return 1
+                if self.closing:  # stopped during the handover
+                    self.shut()
 
 
 def main(argv: list[str]) -> None:
@@ -176,4 +192,7 @@ def main(argv: list[str]) -> None:
         code = Relay(argv, state).run()
     finally:
         os.unlink(state)
-    sys.exit(code)
+    # Not sys.exit: the thread reading stdin holds its lock, and finalizing the interpreter under it aborts.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
