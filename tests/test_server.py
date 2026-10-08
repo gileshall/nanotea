@@ -1003,7 +1003,8 @@ class Service(Tokens, unittest.TestCase):
         finally:
             proc.kill()
             proc.stdout.close()
-        self.assertEqual(out.strip().splitlines()[-2:], ["Yes", '[tap, choice control] {"picked": "Yes"}'])
+        tapped = "[tap on your choice control: your words, picked, not the owner's]"
+        self.assertEqual(out.strip().splitlines()[-2:], ["Yes", tapped + ' {"picked": "Yes"}'])
         asyncio.run(self.controls())
         by =json.loads(self.call("GET", "/api/settings")[1])["costs"]["by"]
         self.assertGreater(by["tools.controls"], 0)
@@ -1053,6 +1054,7 @@ class Service(Tokens, unittest.TestCase):
             out = await self.tool(c, "wait", timeout_s=10)
             self.assertEqual([(i["kind"], i["text"], i["tap"], i["re"]["id"]) for i in out["items"]],
                              [("tap", "Hold", {"control": "choice", "data": {"picked": "Hold"}}, choice)])
+            self.assertIn("not words the owner wrote", out["items"][0]["note"])
             self.assertIn("You tapped", self.call("GET", "/chat/tia")[1])
             for i in (0, 2, 2):
                 self.assertEqual(act(check, "tick", i)[1]["sent"], None)

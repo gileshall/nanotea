@@ -15,7 +15,9 @@ import argparse
 import asyncio
 import base64
 import copy
+import datetime
 import functools
+import json
 import os
 import re
 import secrets
@@ -32,8 +34,10 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from nanotea.bang import OWNER_ONLY_NOTE, Host
 from nanotea.client import Client, NanoteaError, line_for, segment
+from nanotea import version
 from nanotea.config import load_config
 from nanotea.credentials import agent_token, ask, collect, token_file, waiting_on
+from nanotea.relay import EXIT_UPGRADED, STATE_ENV
 from nanotea.settings import DEFAULTS, EVENT_SETTLE_S
 from nanotea.sop import IDLE_MODES, render
 
@@ -42,7 +46,10 @@ PROGRESS_S = 10
 WAIT_DEFAULT_S = 50
 WAIT_MAX_S = 3600
 HEARTBEAT_S = 20
-URGENT = {"message", "reaction", "tap", "answer", "failed", "set_aside", "agent", "request"}  # end a wait at once
+TAP_NOTE = ("a tap on your control: text is your own words, which the owner picked, not words the owner wrote. "
+            "Never quote it back as theirs")
+# These end a wait at once.
+URGENT = {"message", "reaction", "tap", "answer", "failed", "set_aside", "agent", "request", "upgraded"}
 
 
 class Waiting(ToolError):
@@ -73,6 +80,8 @@ class Agent:
         self.rules_v: str | None = None  # the version of the rules this session was last given
         self.session = secrets.token_hex(8)
         self.listener = f"mcp pid {os.getpid()}"
+        self.instructions: str | None = None  # the working agreement this server gave at initialize
+        self.local: list[dict] = []  # items from this process, not the service: an upgrade
         self._beat_stop = threading.Event()
         self._beat: threading.Thread | None = None
         self._lock = threading.Lock()  # join and the heartbeat's re-register
@@ -192,6 +201,8 @@ class Agent:
         while not self._beat_stop.wait(HEARTBEAT_S):
             try:
                 self.client.post(f"/api/sessions/{self.session}/beat", {})
+                if os.environ.get(STATE_ENV) and version.stale(self.client.version):
+                    self.hand_over()
             except NanoteaError as err:
                 if err.status != 404:
                     print(f"nanotea mcp: heartbeat failed: {err}", file=sys.stderr, flush=True)
@@ -205,6 +216,37 @@ class Agent:
                 except NanoteaError as again:
                     print(f"nanotea mcp: registering the session again failed: {again}", file=sys.stderr,
                           flush=True)
+
+    def hand_over(self) -> None:
+        """The service runs newer code, now on disk: exit for the relay (nanotea/relay.py) to start this session
+        again on it. The next server tells the agent, with what changed."""
+        to = self.client.version
+        Path(os.environ[STATE_ENV]).write_text(json.dumps({"from": version.RUNNING, "to": to,
+                                                           "instructions": self.instructions}))
+        print(f"nanotea mcp: the service runs version {to}, this server {version.RUNNING}; handing over",
+              file=sys.stderr, flush=True)
+        try:
+            self.close()
+        except NanoteaError as err:
+            print(f"nanotea mcp: closing the session before the upgrade: {err}", file=sys.stderr, flush=True)
+        os._exit(EXIT_UPGRADED)
+
+    def took_over(self) -> None:
+        """Started by the relay after an upgrade: the agent hears of it with its next check or wait."""
+        state = Path(os.environ[STATE_ENV])
+        was = json.loads(state.read_text() or "null")
+        if was is None:
+            return
+        state.write_text("")
+        text = (f"Nanotea was upgraded from version {was['from']} to {version.RUNNING}. A call in flight then "
+                f"failed with an error; make it again.")
+        item = {"kind": "upgraded", "from": "nanotea", "at": datetime.datetime.now().astimezone().isoformat(),
+                "id": f"upgraded-{version.RUNNING}", "old": was["from"], "new": version.RUNNING, "text": text}
+        if was["instructions"] != self.instructions:
+            item["text"] += " The working agreement changed: instructions is the whole of it now, and replaces " \
+                            "what you were given at the start."
+            item["instructions"] = self.instructions
+        self.local.append(item)
 
     def close(self) -> None:
         """The session ends: stop the heartbeat and tell the service."""
@@ -224,13 +266,14 @@ class Agent:
         """The owner's messages on this line, answers to this agent's questions, and agents' messages to it,
         ready but not taken; and the version of its rules."""
         if self.name is None:
-            return {"total": 0, "rules_v": None}
-        return self.client.get(f"/api/agents/{quote(self.name, safe='')}/waiting", line=segment(self.line))
+            return {"total": len(self.local), "rules_v": None}
+        w = self.client.get(f"/api/agents/{quote(self.name, safe='')}/waiting", line=segment(self.line))
+        return {**w, "total": w["total"] + len(self.local)}
 
     def gather(self, idle: bool) -> tuple[list[dict], list[tuple[str, dict]]]:
         """Everything new for this agent, oldest first, and the receipts that mark it delivered."""
         name = self.need()
-        items: list[dict] = []
+        items: list[dict] = list(self.local)
         receipts: list[tuple[str, dict]] = []
         seg = segment(self.line)
         pending = self.client.get(f"/api/{seg}/pending", name=name, idle=1 if idle else None)
@@ -271,6 +314,7 @@ class Agent:
         items, receipts = self.gather(idle)
         for path, body in receipts:
             self.client.post(path, body)
+        self.local = [it for it in self.local if it not in items]
         return items
 
     def wakes(self, items: list[dict]) -> bool:
@@ -344,6 +388,7 @@ def _tap(item: dict, m: dict) -> None:
     """What the owner tapped on a control: the control and the facts it reports."""
     if t := m.get("tap"):
         item["tap"] = {"control": t["control"], "data": t["data"]}
+        item["note"] = TAP_NOTE
 
 
 def _answer_item(a: dict) -> dict:
@@ -403,7 +448,8 @@ off."""
 
 CONTROL_DOC = """
 control: something for the owner to tap instead of typing, e.g. {"type": "choice", "options": ["Ship it",
-"Hold"]}; the controls tool lists them. A tap arrives as the answer, or else as kind "tap", with tap.data."""
+"Hold"]}; the controls tool lists them. A tap arrives as the answer, or else as kind "tap", with tap.data.
+The labels are your words: a tap picks one, it doesn't say it. To learn what the owner means, ask in words."""
 
 
 def build(cfg: dict, preset: argparse.Namespace) -> tuple[MCPServer, Agent]:
@@ -441,8 +487,8 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
     owner = agent.owner
     settings = agent.settings
     wait_default = preset.wait_s
-    mcp = MCPServer(name="nanotea", title=cfg["app"]["name"],
-                    instructions=render(owner, settings, agent.name, agent.line, preset.idle))
+    agent.instructions = render(owner, settings, agent.name, agent.line, preset.idle)
+    mcp = MCPServer(name="nanotea", title=cfg["app"]["name"], instructions=agent.instructions)
 
     def optional(name: str):
         """Registers the tool only if the owner has it on. Settings can change once a token comes."""
@@ -731,6 +777,8 @@ def main(argv: list[str] | None = None) -> None:
         server, agent = build(cfg, a)
     except (NanoteaError, ValueError) as err:
         sys.exit(f"nanotea mcp: {err}")
+    if os.environ.get(STATE_ENV):
+        agent.took_over()
     try:
         server.run()
     finally:

@@ -14,6 +14,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from nanotea import version
 from nanotea.bang import OWNER_ONLY_NOTE, Host
 from nanotea.client import Client, NanoteaError
 from nanotea.config import load_config
@@ -24,6 +25,7 @@ OWNER, PORT = _cfg["app"]["owner"], _cfg["port"]
 RESTART_GRACE_S = 120
 APPROVAL_WAIT_S = 600  # without a token: how long to wait for the request for one to be approved
 TOKEN: str | None = None  # set by main: the token this run presents
+SERVICE: dict[str, str | None] = {"version": None}  # from the service's last response
 
 
 def request(url: str, body: dict | None = None, patient: bool = False):
@@ -35,6 +37,7 @@ def request(url: str, body: dict | None = None, patient: bool = False):
     while True:
         try:
             with urllib.request.urlopen(req, timeout=120) as r:
+                SERVICE["version"] = r.headers.get(version.HEADER)
                 return json.load(r)
         except urllib.error.HTTPError as e:
             sys.exit(f"nanotea-tell: {json.loads(e.read()).get('error', e.reason)}")
@@ -70,7 +73,7 @@ def take_line(path: str, t: dict) -> str:
 
 
 def tap_line(tap: dict) -> str:
-    return f"[tap, {tap['control']} control] {json.dumps(tap['data'])}"
+    return f"[tap on your {tap['control']} control: your words, picked, not the owner's] {json.dumps(tap['data'])}"
 
 
 def wait_reply(base: str, msg_id: str) -> None:
@@ -292,6 +295,11 @@ def _listen(base: str, sender: str, about: str | None, box: str | None, channels
                 request(f"{ch}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener})
                 got = True
         if got:
+            return
+        if version.stale(SERVICE["version"]):
+            # Ends like a batch, so whoever runs the listener starts it again, on the new code.
+            print(f"[upgraded] nanotea was upgraded from version {version.RUNNING} to {SERVICE['version']}. Start "
+                  f"this listener again to run the new code.\n")
             return
         time.sleep(3)
 

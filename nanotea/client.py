@@ -6,6 +6,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from nanotea.version import HEADER
+
 LINE = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 
 
@@ -42,6 +44,7 @@ class Client:
         self.credential = credential
         self.timeout_s = timeout_s
         self.before = before
+        self.version: str | None = None  # the service's, from its last response
 
     def get(self, path: str, **query):
         q = {k: v for k, v in query.items() if v is not None}
@@ -66,8 +69,10 @@ class Client:
         req = urllib.request.Request(f"{self.base}{path}", data=data, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
+                self.version = r.headers.get(HEADER)
                 return json.load(r)
         except urllib.error.HTTPError as e:
+            self.version = e.headers.get(HEADER)
             raw = e.read()
             try:
                 message = json.loads(raw)["error"]

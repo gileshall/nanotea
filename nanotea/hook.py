@@ -19,6 +19,7 @@ nanotea hook stop|rewake|held|clear --name NAME [--line LINE] [--harness cursor|
 
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
@@ -26,6 +27,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
+from nanotea import version
 from nanotea.client import Client, NanoteaError, line_for, segment
 from nanotea.config import load_config
 from nanotea.credentials import agent_token
@@ -121,6 +123,11 @@ def rewake(client: Client, held: Held, woken: Woken, owner: str, name: str, line
     first_event = None
     while time.monotonic() < deadline:
         w = waiting(client, name, line, idle=True)
+        if version.stale(client.version):
+            # The same wait, on the new code: the harness still holds this process, and the agent stays asleep.
+            left = max(1, int(deadline - time.monotonic()))
+            os.execv(sys.executable, [sys.executable, "-m", "nanotea", "hook", "rewake", "--name", name, "--line",
+                                      line, "--max-s", str(left)])
         if w["total"] and woken.due(w["ids"]):
             only_events = w["total"] == w["events"]
             if only_events and batch:

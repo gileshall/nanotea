@@ -33,7 +33,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from nanotea import audio, bang, configedit, configview, controls, export, files, leaf, markdown, pages, plugins
+from nanotea import (audio, bang, configedit, configview, controls, export, files, leaf, markdown, pages, plugins,
+                     version)
 from nanotea.board import Board, BoardError
 from nanotea.channels import NAME, ChannelError, Channels
 from nanotea.config import CONFIG, Config, ConfigError, load_config, load_env_file, parse_env, resolve
@@ -1385,6 +1386,7 @@ class Handler(BaseHTTPRequestHandler):
         # Every response, errors included: another site framing a paired page could steer the owner's taps.
         self.send_header("Content-Security-Policy", "frame-ancestors 'self'")
         self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header(version.HEADER, version.RUNNING)  # long-lived clients hand over when it changes
         super().end_headers()
 
     @property
@@ -3473,8 +3475,8 @@ def serve() -> None:
     if app.tokens.approver() is None:
         log.warning("No approver yet: the owner approves each agent that asks for a token, in the app under Tokens, "
                     "and can make one agent the approver there.")
-    log.info("listening on %s:%d; public %s; proxies %s", cfg["host"], cfg["port"], app.public_url,
-             ", ".join(sorted(app.proxies)) or "none")
+    log.info("listening on %s:%d; public %s; proxies %s; version %s", cfg["host"], cfg["port"], app.public_url,
+             ", ".join(sorted(app.proxies)) or "none", version.RUNNING)
     for warning in reach_warnings(cfg):
         log.warning("%s", warning)
     server.serve_forever()

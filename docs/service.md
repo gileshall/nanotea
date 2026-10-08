@@ -22,6 +22,28 @@ delivered. `nanotea.db` is an index, rebuilt from the files at each start; the f
 and who is held at a permission prompt are kept in memory: MCP servers register their sessions again after a
 restart.
 
+## Upgrading
+
+Update the code, then restart the service (`launchctl kickstart -k gui/$(id -u)/<label>` under launchd, or
+`docker compose up -d --build`). The service's version is a hash of the package's files; it is in the start-up
+log line and in the `X-Nanotea-Version` header of every response.
+
+Agents' long-lived processes follow on their own once the service runs the new code:
+
+- `nanotea mcp` is a relay that runs the MCP server as a child. On its next heartbeat after the restart, the
+  child sees the new version, closes its session and exits. The relay starts a new one on the code on disk,
+  replays the session's handshake to it, and tells the harness the tools changed. The session keeps its tools,
+  and the agent's next `check` or `wait` returns an item of kind `upgraded` with the old and new versions, and
+  the working agreement if it changed. A call in flight at that moment fails with an error saying to make it
+  again.
+- `nanotea-tell --listen` ends like a batch, printing `[upgraded] ...`, so whoever runs it starts it again.
+- `nanotea hook rewake` starts itself again in place, for the time it had left. The agent isn't woken.
+
+A process hands over only when the code on disk is the service's version. Between updating the code and
+restarting the service, nothing moves. If the relay can't start the new server, it says so on stderr and
+exits, and the harness shows the server as failed: reconnect it there (Claude Code: `/mcp`). A session started
+before the relay existed needs that reconnect once.
+
 ## Web access
 
 Browsers use `public_url`. Recording, notifications and the Home Screen app need it to be https, or this machine's own `http://127.0.0.1`: [running.md](running.md) goes through the ways to get there, from this computer alone to Tailscale, Cloudflare, Caddy and Traefik (`deploy/traefik/` is that example). Where a request comes from decides nothing about what it may do: every request carries a credential, from this machine or not. A page asked for with no credential is answered "not paired" at `public_url`, or through a trusted proxy, and is sent to `public_url` from any other address.

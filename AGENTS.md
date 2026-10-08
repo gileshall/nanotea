@@ -59,6 +59,8 @@ owner's recording --drafts--> server.py --> worker.Transcriber (stt.py) --> deli
 | `server.py` | the HTTP service (stdlib `ThreadingHTTPServer`, no framework): routes, the owner's and agents' APIs, `App` |
 | `pages.py` | every page: Python strings of HTML, CSS and inline JS, including the recorder |
 | `mcp_server.py` | one MCP server per agent session, over stdio; the tools and what each returns |
+| `relay.py` | `nanotea mcp`: runs `mcp_server.py` as a child and starts it again on new code after an upgrade |
+| `version.py` | the code's version, a hash of the package; sent on every response, so long-lived clients hand over |
 | `tell.py` | `nanotea-tell`, the CLI for scripts and event sources |
 | `store.py` | agents' messages: `data/messages/<id>/` with `meta.json`, `original.md`, `reply.json`, audio |
 | `inbox.py`, `channels.py` | what the owner writes: to a line (`Folder`, `Inbox`) or a channel |

@@ -160,8 +160,8 @@ Every result carries `waiting`. With standing rules on, `join` returns `rules`, 
 |---|---|---|
 | `message` | `owner` | `text`, `line` or `channel`, `files`, `re` (the message it replies to, with its `thread` and `url`), `voice` (`transcript`, `audio_path`, `takes`) for recordings |
 | `reaction` | `owner` | `text` is the emoji; `re` is what it reacts to |
-| `tap` | `owner` | the owner tapped a control on one of the agent's messages: `text` says what, `tap` is `{control, data}`, `re` the message |
-| `answer` | `owner` | the answer to one of the agent's questions: `re` is the question, `id` its id, `text`, `files`, `voice`; `tap` when the owner answered with the question's control |
+| `tap` | `owner` | the owner tapped a control on one of the agent's messages: `text` says what, in the agent's own words, `tap` is `{control, data}`, `re` the message, `note` a reminder that the words aren't the owner's |
+| `answer` | `owner` | the answer to one of the agent's questions: `re` is the question, `id` its id, `text`, `files`, `voice`; `tap` and `note` when the owner answered with the question's control |
 | `failed` | `nanotea` | one of the agent's questions failed to send: `re`, `text` |
 | `set_aside` | `nanotea` | the owner set one of the agent's questions aside without answering: `re`, `text`. The owner can still answer it; the answer then arrives as `answer` |
 | `event` | the reporter | something a program with an events token reported: `event` (its kind), `text`, `data` |
@@ -169,6 +169,7 @@ Every result carries `waiting`. With standing rules on, `join` returns `rules`, 
 | `agent` | another agent | a message one agent wrote to this one with `tell`: `text` |
 | `request` | the asker | to the approver: an agent or program asks for a token. `id` for `decide`; `text` gives its name, directory and address |
 | `bang` | `owner` | a command the owner ran in this session with `!` (below): `command`, `cwd`, `exit`, `stdout`, `stderr`, `truncated`, `duration_s`, `timed_out`, `full_output`, and `signal` or `lingering` when they apply. What happened, not a request |
+| `upgraded` | `nanotea` | the service was upgraded and this session's MCP server started again on the new code ([service.md](service.md#upgrading)): `old` and `new` versions, `text`; `instructions`, the whole working agreement, when it changed. A call in flight then failed with an error that says to make it again |
 
 ### Bang commands
 
@@ -229,6 +230,9 @@ than a typed reply. `controls()` lists what is installed; the built-ins are `{"t
 [...]}`, buttons, and `{"type": "checklist", "items": [...], "done"?: "label"}`, which reports what was ticked
 and what wasn't. Others come from plugins ([plugins.md](plugins.md#controls)). The `control` parameter and the
 `controls` tool are there only while the owner has controls on in Settings.
+
+The labels are the agent's words. A tap picks one; it isn't the owner saying it, and the agent is told so with
+each tap. To learn what the owner means, an agent asks in words rather than offering its own paraphrases.
 
 Answers wait on the service for the agent's name, so a question asked in one session is answered in the next if
 the first has ended. A voice reply's transcript is in `voice.transcript`; if transcription failed, `voice.error`

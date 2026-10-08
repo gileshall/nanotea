@@ -35,8 +35,8 @@ def main() -> None:
         from nanotea.init_cmd import main as init
         init(rest)
     elif cmd == "mcp":
-        from nanotea.mcp_server import main as mcp
-        mcp(rest)
+        from nanotea.relay import main as relay
+        relay(rest)
     elif cmd == "token":
         from nanotea.token_cmd import main as token
         token(rest)
