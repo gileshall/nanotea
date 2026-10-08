@@ -30,7 +30,12 @@ class Relay(Case):
         cls.pkg = Path(cls.tmp.name) / "pkg"
         shutil.copytree(ROOT / "nanotea", cls.pkg / "nanotea", ignore=shutil.ignore_patterns("__pycache__"))
         server = cls.pkg / "nanotea" / "mcp_server.py"
-        server.write_text(server.read_text().replace("HEARTBEAT_S = 20\n", "HEARTBEAT_S = 1\n"))
+        # The heartbeat finds the upgrade. A wait polls too slowly to meet the restart, so it is still in flight.
+        code = server.read_text()
+        for was, now in (("HEARTBEAT_S = 20\n", "HEARTBEAT_S = 1\n"), ("POLL_S = 2\n", "POLL_S = 600\n")):
+            assert was in code, was
+            code = code.replace(was, now)
+        server.write_text(code)
         cls.env = {**cls.env, "PYTHONPATH": str(cls.pkg)}
         cls.restart()
 
@@ -119,6 +124,8 @@ class Relay(Case):
         relay.stdin.close()
         self.assertEqual(relay.wait(timeout=30), 0, errors)
         self.assertTrue(any("handing over" in e for e in errors), errors)
+        # The restarted service forgot the session; the old server handed over rather than register on new code.
+        self.assertFalse(any("registered it again" in e for e in errors), errors)
 
     def test_listeners_hand_over(self):
         self.token("Wes")

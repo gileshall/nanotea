@@ -201,9 +201,9 @@ class Agent:
         while not self._beat_stop.wait(HEARTBEAT_S):
             try:
                 self.client.post(f"/api/sessions/{self.session}/beat", {})
-                if os.environ.get(STATE_ENV) and version.stale(self.client.version):
-                    self.hand_over()
             except NanoteaError as err:
+                if self.outdated():  # before registering again: the next server registers on the new code
+                    self.hand_over()
                 if err.status != 404:
                     print(f"nanotea mcp: heartbeat failed: {err}", file=sys.stderr, flush=True)
                     continue
@@ -216,6 +216,12 @@ class Agent:
                 except NanoteaError as again:
                     print(f"nanotea mcp: registering the session again failed: {again}", file=sys.stderr,
                           flush=True)
+            else:
+                if self.outdated():
+                    self.hand_over()
+
+    def outdated(self) -> bool:
+        return bool(os.environ.get(STATE_ENV)) and version.stale(self.client.version)
 
     def hand_over(self) -> None:
         """The service runs newer code, now on disk: exit for the relay (nanotea/relay.py) to start this session

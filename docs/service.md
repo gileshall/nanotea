@@ -35,7 +35,7 @@ Agents' long-lived processes follow on their own once the service runs the new c
   replays the session's handshake to it, and tells the harness the tools changed. The session keeps its tools,
   and the agent's next `check` or `wait` returns an item of kind `upgraded` with the old and new versions, and
   the working agreement if it changed. A call in flight at that moment fails with an error saying to make it
-  again.
+  again. One that reaches the service while it restarts fails as not reachable; made again, it works.
 - `nanotea-tell --listen` ends like a batch, printing `[upgraded] ...`, so whoever runs it starts it again.
 - `nanotea hook rewake` starts itself again in place, for the time it had left. The agent isn't woken.
 

@@ -537,31 +537,37 @@ class Run:
         origin = self.sc["public_url"]
         reg = next((r for r in regs if r["scopeURL"].startswith(origin) and not r["isDeleted"]), None)
         check(reg, f"no service worker registration for {origin}: {regs}")
-        # What the worker did with the push: a showNotification that rejects inside waitUntil reports nowhere.
+        # The worker's own record is the check: the browser's list of notifications afterwards depends on the
+        # machine's notification server, which a headless CI runner may not keep them in.
         worker = next((w for w in self.context.service_workers if w.url.startswith(origin)), None)
-        check(worker, f"no service worker in the context for {origin}: {[w.url for w in self.context.service_workers]}")
+        check(worker, f"no service worker for {origin}: {[w.url for w in self.context.service_workers]}")
         await worker.evaluate("""() => {
             self.__e2e = [`permission ${Notification.permission}`];
             self.addEventListener("push", () => self.__e2e.push("push"));
             const show = self.registration.showNotification.bind(self.registration);
-            self.registration.showNotification = (...a) => show(...a).then(
-                (v) => { self.__e2e.push("shown"); return v; },
+            self.registration.showNotification = (title, ...rest) => show(title, ...rest).then(
+                async (v) => {
+                    self.__e2e.push(`shown ${title}`);
+                    const listed = await self.registration.getNotifications();
+                    self.__e2e.push(`listed ${JSON.stringify(listed.map((n) => n.title))}`);
+                    return v;
+                },
                 (e) => { self.__e2e.push(`showNotification: ${e}`); throw e; });
         }""")
         await cdp.send("ServiceWorker.deliverPushMessage", {"origin": origin, "registrationId": reg["registrationId"],
                                                             "data": json.dumps(got["payload"])})
-        shown = []
+        title = got["payload"]["title"]
+        seen: list[str] = []
         for _ in range(40):
-            shown = await self.page.evaluate("""navigator.serviceWorker.ready.then((r) => r.getNotifications())
-                .then((ns) => ns.map((n) => ({title: n.title, body: n.body, tag: n.tag})))""")
-            if shown:
+            seen = await worker.evaluate("self.__e2e")
+            if any(x.startswith(("listed ", "showNotification: ")) for x in seen):
                 break
             await asyncio.sleep(0.5)
-        self.metrics["shown"] = shown
-        if not any(n["title"] == got["payload"]["title"] for n in shown):
-            seen = await worker.evaluate("self.__e2e")
-            raise Failed(f"the worker showed {shown}; in the worker {seen}; worker versions {versions}, "
-                         f"errors {sw_errors}")
+        self.metrics["worker"] = seen
+        self.metrics["browser_listed"] = await self.page.evaluate("""navigator.serviceWorker.ready
+            .then((r) => r.getNotifications()).then((ns) => ns.map((n) => n.title))""")
+        check(f"shown {title}" in seen,
+              f"the worker didn't show {title!r}: in the worker {seen}; worker versions {versions}, errors {sw_errors}")
 
     async def event_source(self):
         tell = self.spawn("tell-event", [str(self.bin / "nanotea-tell"), "--event", "build", "--from", SOURCE,
