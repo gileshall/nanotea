@@ -83,7 +83,9 @@ owner's recording --drafts--> server.py --> worker.Transcriber (stt.py) --> deli
 | `hush.py` | the owner's notification choices: muted agents and channels, only questions, quiet hours |
 | `export.py` | messages as markdown, for `/export.md` |
 | `bang.py` | the owner's `!command`: `[bang]` settings, `run`, and `Host`, the session-side loop that runs commands |
-| `sop.py` | the working agreement agents are given; `setup.py`, `hook.py`: per-harness wiring |
+| `sop.py` | the working agreement agents are given, and its brief form |
+| `quirks.py` | what differs between harnesses, as data: idle mode, wait, how much of the agreement each keeps |
+| `setup.py`, `hook.py` | per-harness wiring: what `nanotea setup` prints, and the hooks |
 
 Docs: [docs/agents.md](docs/agents.md) (harnesses, tools, what arrives), [docs/cli.md](docs/cli.md),
 [docs/running.md](docs/running.md) (how browsers reach it, every way, and how each was checked),
@@ -99,8 +101,8 @@ Docs: [docs/agents.md](docs/agents.md) (harnesses, tools, what arrives), [docs/c
   (temp file, then `os.replace`), and build a message in a hidden directory before renaming it into place.
 - **What the owner sends is kept as sent.** Recordings, takes and attachments are never re-encoded in place.
   A joined track is a copy; the originals stay beside it.
-- **Harness-neutral.** Anything specific to one harness lives in `setup.py` and `hook.py`. `nanotea setup`
-  prints and never writes.
+- **Harness-neutral.** Anything specific to one harness lives in `quirks.py` (how nanotea behaves for it), `setup.py`
+  and `hook.py` (how it is wired). `nanotea setup` prints and never writes.
 - **Agents get facts, not guesses.** If the browser didn't report something (a sample rate, a mic), it is
   `null`, not a plausible value.
 - **Every new backend is a plugin.** See [docs/plugins.md](docs/plugins.md); nothing registers by editing a dict.

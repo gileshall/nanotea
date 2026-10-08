@@ -7,8 +7,8 @@ Without a token, it asks the service for one (nanotea/enroll.py) under its --nam
 answers tool calls with what it waits on until the approver or the owner approves; it then collects the token and
 goes on. Until then it offers the tools of the default settings.
 
-Run: nanotea mcp [--name NAME [--line LINE] [--voice ID] [--channel NAME ...]] [--idle finish|wait|hook] [--wait-s N]
-     [--bang]
+Run: nanotea mcp [--name NAME [--line LINE] [--voice ID] [--channel NAME ...]] [--harness NAME]
+     [--idle finish|wait|hook] [--wait-s N] [--bang]
 """
 
 import argparse
@@ -37,13 +37,14 @@ from nanotea.client import Client, NanoteaError, line_for, segment
 from nanotea import version
 from nanotea.config import load_config
 from nanotea.credentials import agent_token, ask, collect, token_file, waiting_on
+from nanotea import quirks
 from nanotea.relay import EXIT_UPGRADED, STATE_ENV
 from nanotea.settings import DEFAULTS, EVENT_SETTLE_S
 from nanotea.sop import IDLE_MODES, render
 
 POLL_S = 2
 PROGRESS_S = 10
-WAIT_DEFAULT_S = 50
+WAIT_DEFAULT_S = quirks.Quirks.wait_s
 WAIT_MAX_S = 3600
 HEARTBEAT_S = 20
 TAP_NOTE = ("a tap on your control: text is your own words, which the owner picked, not words the owner wrote. "
@@ -493,7 +494,12 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
     owner = agent.owner
     settings = agent.settings
     wait_default = preset.wait_s
-    agent.instructions = render(owner, settings, agent.name, agent.line, preset.idle)
+    most = preset.quirks.instructions_max
+    agent.instructions = render(owner, settings, agent.name, agent.line, preset.idle, brief=most is not None)
+    if most is not None and len(agent.instructions) > most:
+        raise ValueError(f"the brief working agreement is {len(agent.instructions)} characters, over the {most} "
+                         f"{preset.harness} keeps; turn off agreement settings this agent doesn't need "
+                         f"(Settings > Agents)")
     mcp = MCPServer(name="nanotea", title=cfg["app"]["name"], instructions=agent.instructions)
 
     def optional(name: str):
@@ -732,7 +738,7 @@ def tool_definitions(cfg: dict, controls: bool = True) -> dict[str, dict]:
     everything = {**DEFAULTS, "agent_messages": "shown", "tools": {**DEFAULTS["tools"], "controls": controls}}
     agent = Agent(Client(cfg["port"], None), cfg["app"]["owner"], everything)
     preset = argparse.Namespace(name=None, line=None, voice=None, channel=[], idle="finish", wait_s=WAIT_DEFAULT_S,
-                              bang=False)
+                              bang=False, harness=None, quirks=quirks.of(None))
     tools = asyncio.run(make(cfg, agent, preset).list_tools())
     return {t.name: t.model_dump(by_alias=True, exclude_none=True, include={"name", "description", "input_schema"})
             for t in tools}
@@ -756,28 +762,41 @@ def _send(agent: Agent, text: str, title: str | None, channel: str | None, attac
     return {"id": out["id"], "url": out["url"]}
 
 
-def main(argv: list[str] | None = None) -> None:
+def options(argv: list[str] | None) -> argparse.Namespace:
+    """nanotea mcp's arguments, with what --harness implies filled in."""
     p = argparse.ArgumentParser(prog="nanotea mcp", description="Nanotea MCP server for one agent session, over stdio.")
     p.add_argument("--name", help="join as this agent at start, instead of waiting for the join tool")
     p.add_argument("--line", help="with --name: the line to hold (default: the name)")
     p.add_argument("--voice", help="with --name: the voice id")
     p.add_argument("--channel", action="append", default=[], help="with --name: a channel to receive posts from")
-    p.add_argument("--idle", choices=IDLE_MODES, default="finish",
+    p.add_argument("--harness", choices=quirks.QUIRKS,
+                   help="the harness that runs this server, for its quirks (nanotea/quirks.py): the defaults of "
+                        "--idle and --wait-s, and the brief agreement where it keeps only part of a server's "
+                        "instructions. nanotea setup writes it")
+    p.add_argument("--idle", choices=IDLE_MODES,
                    help="what the agent is told to do with nothing left to do: check, then finish unless put on "
-                        "call (default); wait in a loop; or end its turn because a hook (nanotea hook) brings it "
-                        "back")
-    p.add_argument("--wait-s", type=int, default=WAIT_DEFAULT_S,
-                   help=f"the wait tool's default timeout (default {WAIT_DEFAULT_S}: under the 60 s many harnesses "
-                        f"allow a tool call)")
+                        "call (the default without a harness); wait in a loop; or end its turn because a hook "
+                        "(nanotea hook) brings it back")
+    p.add_argument("--wait-s", type=int,
+                   help=f"the wait tool's default timeout (default {WAIT_DEFAULT_S} without a harness: under the 60 s "
+                        f"many harnesses allow a tool call)")
     p.add_argument("--bang", action="store_true",
                    help="run the owner's bang commands (!command on this agent's line) in this session, if they "
                         "have turned them on in Settings. Only someone who can edit the harness's MCP config can "
                         "give this; it is what lets a command run on this machine")
     a = p.parse_args(argv)
+    a.quirks = quirks.of(a.harness)
+    a.idle = a.idle or a.quirks.idle
+    a.wait_s = a.wait_s if a.wait_s is not None else a.quirks.wait_s
     if not a.name and (a.line or a.voice or a.channel):
         p.error("--line, --voice and --channel go with --name")
     if not 1 <= a.wait_s <= WAIT_MAX_S:
         p.error(f"--wait-s must be 1 to {WAIT_MAX_S}")
+    return a
+
+
+def main(argv: list[str] | None = None) -> None:
+    a = options(argv)
     cfg = load_config()
     try:
         server, agent = build(cfg, a)

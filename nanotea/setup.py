@@ -2,7 +2,7 @@
 harness configs are the user's.
 
 nanotea setup HARNESS --name NAME [--line LINE] [--voice ID] [--channel NAME ...] [--bang]
-nanotea sop [--name NAME] [--line LINE] [--idle MODE] [--bang] [--skill]
+nanotea sop [--name NAME] [--line LINE] [--harness NAME] [--idle MODE] [--bang] [--skill]
 """
 
 import argparse
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from nanotea import quirks
 from nanotea.client import Client, NanoteaError, line_for
 from nanotea.config import CONFIG, load_config
 from nanotea.credentials import owner_key, token_path
@@ -269,25 +270,10 @@ Scripts and event sources: nanotea-tell, the command line (nanotea-tell --help).
 """
 
 
-@dataclass
-class Harness:
-    show: Callable[[Agent], str]
-    idle: str  # the agent's idle mode with this harness's hooks
-    wait_s: int
-
-
-HARNESSES = {
-    "claude": Harness(claude, "hook", 50),
-    "codex": Harness(codex, "finish", 50),
-    "cursor": Harness(cursor, "finish", 50),
-    "gemini": Harness(gemini, "finish", 300),
-    "opencode": Harness(opencode, "finish", 50),
-    "goose": Harness(goose, "finish", 240),
-    "vscode": Harness(vscode, "finish", 50),
-    "zed": Harness(zed, "finish", 50),
-    "cline": Harness(cline, "finish", 50),
-    "amp": Harness(amp, "finish", 50),
-    "other": Harness(other, "finish", 50),
+# What to paste into each harness. What nanotea mcp does differently for one is in quirks.py.
+HARNESSES: dict[str, Callable[[Agent], str]] = {
+    "claude": claude, "codex": codex, "cursor": cursor, "gemini": gemini, "opencode": opencode, "goose": goose,
+    "vscode": vscode, "zed": zed, "cline": cline, "amp": amp, "other": other,
 }
 
 
@@ -313,7 +299,6 @@ def setup(argv: list[str]) -> None:
                         "Settings). This puts --bang in the MCP arguments: anyone who can edit that config can give it")
     a = p.parse_args(argv)
     cfg = load_config()
-    h = HARNESSES[a.harness]
     line = a.line or line_for(a.name)
     args = ["mcp", "--name", a.name]
     if a.line:
@@ -322,10 +307,7 @@ def setup(argv: list[str]) -> None:
         args += ["--voice", a.voice]
     for c in a.channel:
         args += ["--channel", c]
-    if h.idle != "finish":
-        args += ["--idle", h.idle]
-    if h.wait_s != 50:
-        args += ["--wait-s", str(h.wait_s)]
+    args += ["--harness", a.harness]
     if a.bang:
         args += ["--bang"]
     token_file = token_path(a.name)
@@ -334,7 +316,9 @@ def setup(argv: list[str]) -> None:
         print(f"No token for {a.name!r} yet at {token_file}. nanotea mcp asks for one when it first starts, and "
               f"collects it there once the approver or you approve it, in the app under Tokens.\n"
               f"The config below names that file and holds no secret.\n")
-    print(h.show(agent).replace("{owner}", cfg["app"]["owner"]).replace("{wait_s}", f"{h.wait_s} seconds"), end="")
+    wait_s = quirks.QUIRKS[a.harness].wait_s
+    print(HARNESSES[a.harness](agent).replace("{owner}", cfg["app"]["owner"]).replace("{wait_s}", f"{wait_s} seconds"),
+          end="")
     if a.bang:
         print(f"nanotea setup: --bang is in the arguments: this session runs the commands {cfg['app']['owner']} types "
               f"with !, on this machine, once Settings turns bang commands on", file=sys.stderr)
@@ -358,7 +342,11 @@ def sop(argv: list[str]) -> None:
                                 description="Print the working agreement: a section for AGENTS.md, or an Agent Skill.")
     p.add_argument("--name", help="the agent's name, if every agent reading it is the same one")
     p.add_argument("--line", help="with --name: its line")
-    p.add_argument("--idle", choices=IDLE_MODES, default="finish", help="what to do with nothing left to do")
+    p.add_argument("--harness", choices=quirks.QUIRKS,
+                   help="as nanotea mcp gives it to that harness: its idle mode, and the brief form where the "
+                        "harness keeps only part of a server's instructions")
+    p.add_argument("--idle", choices=IDLE_MODES, help="what to do with nothing left to do (default: the harness's, "
+                                                      "or finish)")
     p.add_argument("--skill", action="store_true", help="print a SKILL.md instead of an AGENTS.md section")
     p.add_argument("--bang", action="store_true",
                    help="for an agent whose session is started with --bang: include what to do with the owner's "
@@ -373,5 +361,7 @@ def sop(argv: list[str]) -> None:
     except NanoteaError as err:
         sys.exit(f"nanotea sop: the agreement follows the service's settings, so it needs the service: {err}")
     settings["bang"] = settings["bang"] and a.bang
-    body = render(owner, settings, a.name, (a.line or line_for(a.name)) if a.name else None, a.idle)
+    q = quirks.of(a.harness)
+    body = render(owner, settings, a.name, (a.line or line_for(a.name)) if a.name else None, a.idle or q.idle,
+                  brief=q.instructions_max is not None)
     print((SKILL_HEAD.format(owner=owner) if a.skill else "## Nanotea\n\n") + body, end="")

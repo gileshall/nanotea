@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib.patches import Circle, FancyBboxPatch
 
 from kit import BOLD, GREEN, INK, KINDS, MUTED, RULE, axes, canvas, in_order, ref, sequence
-from nanotea import plugins, setup
+from nanotea import plugins, quirks, setup
 from nanotea.client import line_for
 from nanotea.mcp_server import tool_definitions
 from nanotea.settings import CORE_TOOLS, DEFAULTS, FEATURES, costs, on, session_total
@@ -83,9 +83,8 @@ def harnesses(facts):
             ("hook held", "Shows you it is held\nat a permission prompt")]
     rows = []
     for key, name in NAMES.items():
-        h = setup.HARNESSES[key]
-        text = h.show(agent)
-        rows.append((name, h.wait_s, [f" {mode} " in text for mode, _ in cols]))
+        text = setup.HARNESSES[key](agent)
+        rows.append((name, quirks.QUIRKS[key].wait_s, [f" {mode} " in text for mode, _ in cols]))
     width, top, pitch = 9.0, 1.45, 0.36
     height = top + len(rows) * pitch + 0.75
     fig, ax = canvas(width, height)

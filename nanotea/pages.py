@@ -3917,7 +3917,12 @@ def prompts_page(view: dict) -> str:
         'after it. Not editable here: change the switches, or add a rule.</p>'
         f'<pre>{e(a["text"])}</pre>'
         f'<details><summary>Every line, and what adds it</summary><table class="lines">{lines}</table>'
-        f'<p class="meta">The idle line depends on how the session waits:</p>{idle}</details>')
+        f'<p class="meta">The idle line depends on how the session waits:</p>{idle}</details>'
+        f'<details><summary>The brief form ({len(a["brief"])} of {a["brief_max"]} characters)</summary>'
+        '<p class="meta">Some harnesses keep only so much of what a server tells the agent, so their sessions get '
+        'the same rules in fewer words: '
+        + ", ".join(f'<code>nanotea mcp --harness {e(h)}</code>' for h in a["brief_for"]) + '.</p>'
+        f'<pre>{e(a["brief"])}</pre></details>')
     tools = ('<h2 id="tools">Tools agents are shown</h2><p class="meta">Each tool\'s description is text the '
              'model reads. Optional tools show only while their switch is on.</p>'
              + "".join(f'<details><summary>{e(t["name"])}</summary><pre>{e(t["description"])}</pre></details>'

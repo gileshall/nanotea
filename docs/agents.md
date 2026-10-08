@@ -11,9 +11,12 @@ nanotea setup claude --name builder
 ```
 
 `nanotea setup` prints what to paste for that harness: the MCP server entry with absolute paths, its hooks, and
-its timeouts. It writes nothing, and it names the token file (`NANOTEA_TOKEN_FILE`), never the secret, so the
-output can be committed. The agent's first session asks for its token (see [Tokens](#tokens)). Harnesses: `claude`, `codex`, `cursor`, `gemini`, `opencode`, `goose`, `vscode`, `zed`,
-`cline`, `amp`, and `other` for any MCP client. `--voice`, `--line` and `--channel` join the agent with those
+its timeouts. The entry runs `nanotea mcp --harness <harness>`, which tunes the server to that harness's quirks
+(`nanotea/quirks.py`): how the agent idles, how long `wait` holds, and how much of the agreement the harness keeps.
+A quirk added there reaches running sessions at their next upgrade. Setup writes nothing, and it names the token
+file (`NANOTEA_TOKEN_FILE`), never the secret, so the output can be committed. The agent's first session asks for
+its token (see [Tokens](#tokens)). Harnesses: `claude`, `codex`, `cursor`, `gemini`, `opencode`, `goose`, `vscode`,
+`zed`, `cline`, `amp`, and `other` for any MCP client. `--voice`, `--line` and `--channel` join the agent with those
 when the server starts.
 
 | Harness | Brings the agent back | Shows a permission prompt | Checked |
@@ -117,13 +120,19 @@ decisions through `ask`, one question each, and act on what the owner already sa
 confirm a misheard voice reply before anything consequential. `nanotea sop` reads the settings from the service,
 so it needs the service running.
 
-What an agent does with nothing left to do depends on its harness, set with `nanotea mcp --idle`:
+Claude Code keeps only the first 2048 characters of a server's instructions and drops the rest without telling
+the model. With `--harness claude`, the server gives the agreement in a brief form that says every rule in less,
+and tells the agent to ask through `ask`, not AskUserQuestion, since the owner may be away from the screen.
+`nanotea sop --harness claude` prints it. With every setting on it fits with room for long names, and a test keeps
+it so; if it ever doesn't fit, the server refuses to start and says why.
+
+What an agent does with nothing left to do depends on its harness, set by `--harness` or with `nanotea mcp --idle`:
 
 | `--idle` | The agent is told to | For |
 |---|---|---|
 | `finish` (default) | check, then end its turn; wait in a loop only when put on call | harnesses without a wake hook, and interactive use |
 | `wait` | wait in a loop, always | dedicated on-call agents |
-| `hook` | end its turn; a hook brings it back | Claude Code with the rewake hook (`nanotea setup claude` sets it) |
+| `hook` | end its turn; a hook brings it back | Claude Code with the rewake hook (`--harness claude`) |
 
 The server also offers the prompt `on_call`, which puts the agent on call: join, then wait in a loop and act on
 what the owner sends until told to stop.
@@ -252,7 +261,7 @@ No MCP feature can put a message in front of an idle model, so nanotea uses thre
 
 1. Tools. The agent sees `waiting` on every result, checks between steps, and waits when on call. Many
    harnesses give a tool call about 60 seconds, so `wait` returns within 50 by default and the agent calls it
-   again; `nanotea setup` raises `--wait-s` where a harness allows longer. With the wake filter on, `wait`
+   again; `--harness` raises it where a harness allows longer. With the wake filter on, `wait`
    returns at once only for the owner's words, reactions and answers, other agents' messages, and posts that
    @mention the agent; other posts collect until the wait ends, and come with it. With Batch events on, an
    event lets others arrive for 5 seconds before `wait` hands them over together.

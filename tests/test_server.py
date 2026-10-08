@@ -20,6 +20,7 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 
 from nanotea.settings import DEFAULTS, EVENT_SETTLE_S, session_total
+from nanotea.sop import BRIEF_MAX
 from harness import Tokens, spawn, stop
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -346,17 +347,22 @@ class Service(Tokens, unittest.TestCase):
                 self.assertTrue(blocks or harness in ("codex", "goose", "other"))
         out = run("setup", "claude", "--name", "Builder Two")
         server = json.loads(re.search(r"^\{\n.*?^\}$", out, re.S | re.M)[0])["mcpServers"]["nanotea"]
-        self.assertEqual(server["args"], ["mcp", "--name", "Builder Two", "--idle", "hook"])
+        self.assertEqual(server["args"], ["mcp", "--name", "Builder Two", "--harness", "claude"])
         self.assertEqual(server["env"]["NANOTEA_CONFIG"], str(self.config.resolve()))
         self.assertIn("hook rewake --name 'Builder Two'", out)
         toml = tomllib.loads(re.search(r"^\[mcp_servers\.nanotea\]$.*?^NANOTEA_CONFIG = .*?$",
                                        run("setup", "codex", "--name", "builder"), re.S | re.M)[0])
-        self.assertEqual(toml["mcp_servers"]["nanotea"]["args"], ["mcp", "--name", "builder"])
+        self.assertEqual(toml["mcp_servers"]["nanotea"]["args"], ["mcp", "--name", "builder", "--harness", "codex"])
         self.assertEqual(toml["mcp_servers"]["nanotea"]["env"]["NANOTEA_CONFIG"], str(self.config.resolve()))
         out = run("sop", "--name", "builder", "--idle", "wait")
         self.assertTrue(out.startswith("## Nanotea\n\nNanotea connects you to Robin"))
         self.assertIn('You are joined as "builder"', out)
         self.assertIn("call wait, and call it again", out)
+        out = run("sop", "--name", "builder", "--harness", "claude")
+        self.assertIn('You are "builder" on line "builder"', out)
+        self.assertIn("not AskUserQuestion", out)
+        self.assertIn("a hook wakes you", out)
+        self.assertLessEqual(len(out.removeprefix("## Nanotea\n\n")), BRIEF_MAX)
         out = run("sop", "--skill")
         self.assertTrue(out.startswith("---\nname: nanotea\n"))
         self.assertIn("Call join once at the start", out)

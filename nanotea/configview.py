@@ -5,7 +5,7 @@ here: a key from env_file is only set or missing, and any secret's value is scru
 import json
 import tomllib
 
-from nanotea import audio, bang, configedit, plugins, sop, themes
+from nanotea import audio, bang, configedit, plugins, quirks, sop, themes
 from nanotea.config import APP, NOTIFY, TOP, Option
 from nanotea.prompts import MAX_CHARS, NAMES
 from nanotea.rewrite import OUTPUT_CONTRACT, SCHEMA, ClaudeRewriter, CommandRewriter, request
@@ -251,7 +251,9 @@ def prompts(app) -> dict:
                     "builtin": p.builtin("rewrite"), "text": p.text("rewrite"), "kept_at": str(p.path("rewrite")),
                     "max_chars": MAX_CHARS, "contract": OUTPUT_CONTRACT.strip(), "request": example,
                     "schema": json.dumps(json.loads(SCHEMA), indent=2), "name": "rewrite", "names": list(NAMES)},
-        "agreement": {"text": sop.render(owner, now), "lines": lines,
+        "agreement": {"text": sop.render(owner, now), "brief": sop.render(owner, now, brief=True),
+                      "brief_max": sop.BRIEF_MAX, "lines": lines,
+                      "brief_for": [h for h, q in quirks.QUIRKS.items() if q.instructions_max],
                       "idle": {k: v.format(owner=owner) for k, v in sop.IDLE.items()}},
         "tools": [{"name": n, "description": d["description"]} for n, d in app.tool_defs.items()],
         "other": [{"what": "The on_call prompt agents can invoke", "text": on_call_text(owner, None)},

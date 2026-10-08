@@ -97,7 +97,7 @@ class Relay(Case):
 
         # Mid-deploy: the code on disk is new, the service still old. Nothing hands over.
         sop = self.pkg / "nanotea" / "sop.py"
-        sop.write_text(sop.read_text().replace("LINES = [\n", f'LINES = [\n    (None, "{LINE}"),\n'))
+        sop.write_text(sop.read_text().replace("LINES = [\n", f'LINES = [\n    (None, "{LINE}", "{LINE}"),\n'))
         time.sleep(3)
         self.assertTrue(lines.empty(), lines.queue)
         self.assertFalse(any("handing over" in e for e in errors), errors)
