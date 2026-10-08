@@ -537,6 +537,17 @@ class Run:
         origin = self.sc["public_url"]
         reg = next((r for r in regs if r["scopeURL"].startswith(origin) and not r["isDeleted"]), None)
         check(reg, f"no service worker registration for {origin}: {regs}")
+        # What the worker did with the push: a showNotification that rejects inside waitUntil reports nowhere.
+        worker = next((w for w in self.context.service_workers if w.url.startswith(origin)), None)
+        check(worker, f"no service worker in the context for {origin}: {[w.url for w in self.context.service_workers]}")
+        await worker.evaluate("""() => {
+            self.__e2e = [`permission ${Notification.permission}`];
+            self.addEventListener("push", () => self.__e2e.push("push"));
+            const show = self.registration.showNotification.bind(self.registration);
+            self.registration.showNotification = (...a) => show(...a).then(
+                (v) => { self.__e2e.push("shown"); return v; },
+                (e) => { self.__e2e.push(`showNotification: ${e}`); throw e; });
+        }""")
         await cdp.send("ServiceWorker.deliverPushMessage", {"origin": origin, "registrationId": reg["registrationId"],
                                                             "data": json.dumps(got["payload"])})
         shown = []
@@ -547,8 +558,10 @@ class Run:
                 break
             await asyncio.sleep(0.5)
         self.metrics["shown"] = shown
-        check(any(n["title"] == got["payload"]["title"] for n in shown),
-              f"the worker showed {shown}; worker versions {versions}, errors {sw_errors}")
+        if not any(n["title"] == got["payload"]["title"] for n in shown):
+            seen = await worker.evaluate("self.__e2e")
+            raise Failed(f"the worker showed {shown}; in the worker {seen}; worker versions {versions}, "
+                         f"errors {sw_errors}")
 
     async def event_source(self):
         tell = self.spawn("tell-event", [str(self.bin / "nanotea-tell"), "--event", "build", "--from", SOURCE,
