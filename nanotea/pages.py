@@ -2124,13 +2124,18 @@ CONVO_SCRIPT = """
   const fetchRow = Boolean(want && !target && /^[mg]-/.test(want));
   let pinned = !target && !fetchRow;
   const pin = () => { if (pinned) scroller.scrollTop = scroller.scrollHeight; };
+  const atBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 4;
+  // Only a scroll up lets go of the bottom. A picture above that loads after the pin grows the list, and the
+  // scroll event that follows would read as one, leaving the view part way up.
+  let lastTop = scroller.scrollTop;
   scroller.addEventListener("scroll", () => {
-    pinned = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 4;
+    if (atBottom()) pinned = true;
+    else if (scroller.scrollTop < lastTop) pinned = false;
+    lastTop = scroller.scrollTop;
   }, { passive: true });
   const watch = new ResizeObserver(pin);
   watch.observe(scroller);
   watch.observe(document.getElementById("thread"));
-  const atBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 4;
   // Landing on a row that ends the list counts as being at the bottom.
   const land = (row) => {
     row.scrollIntoView();
