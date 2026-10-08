@@ -70,6 +70,7 @@ class Relay(Case):
         if relay.poll() is None:
             relay.kill()
         relay.wait(timeout=30)
+        relay.stdin.close()
         relay.stdout.close()
         relay.stderr.close()
 

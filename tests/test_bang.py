@@ -141,10 +141,11 @@ class Bang(Case):
     def test_off_by_default_and_ordinary(self):
         self.assertFalse(json.loads(self.call("GET", "/api/settings")[1])["settings"]["bang"])
         proc = self.listener("Ada", bang=False)
+        # Delivered as an ordinary message, which returns the listener as any message does.
         self.assertEqual(self.bang("Ada", "!echo nope")[0], 200)
-        out = self.end(proc, "Ada")
+        out, err = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, err)
         self.assertIn("!echo nope", out)
-        self.assertIn("that is all", out)
         self.assertNotIn("[bang", out)
         self.assertEqual(self.hint("Ada"), "")
         self.assertEqual([a for a in self.audit() if a.get("agent") == "Ada"], [])
