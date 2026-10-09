@@ -51,6 +51,9 @@ BLOCKS = [
     ("3. a\n4. b", '<ol start="3"><li>a</li><li>b</li></ol>'), ("x\n2. y", "<p>x\n2. y</p>"),
     ("- [x] a\n- [ ] b", '<ul><li class="task"><input type="checkbox" disabled checked>a</li>'
                          '<li class="task"><input type="checkbox" disabled>b</li></ul>'),
+    ("-", "<ul><li></li></ul>"), ("- a\n-", "<ul><li>a</li><li></li></ul>"),
+    ("1.\n2. b", "<ol><li></li><li>b</li></ol>"), ("-\n\n- b", "<ul><li></li><li><p>b</p></li></ul>"),
+    ("- \n  x", "<ul><li>x</li></ul>"),
     ("# A\n#b", "<h1>A</h1><p>#b</p>"), ("---", "<hr>"), ("a\n---", "<p>a</p><hr>"),
     ("| a | b |\n|:-|-:|\n| 1 | 2 \\| 3 |", '<div class="table"><table><thead><tr><th style="text-align: left">a'
      '</th><th style="text-align: right">b</th></tr></thead><tbody><tr><td style="text-align: left">1</td>'

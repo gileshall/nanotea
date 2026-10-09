@@ -25,6 +25,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -1390,6 +1391,29 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
         self.extra_headers: list[tuple[str, str]] = []
 
+    def send_response(self, code: int, message: str | None = None) -> None:
+        self.answered = True
+        super().send_response(code, message)
+
+    def _guard(self, handle: Callable[[], None]) -> None:
+        """Runs handle; an error it didn't answer is answered 500 with its name, then logged by handle_error.
+        Dropped unanswered, a proxy shows it as a bare 502."""
+        self.answered = False
+        try:
+            handle()
+        except (ConnectionError, TimeoutError):
+            raise
+        except Exception as err:
+            if not self.answered:
+                self.close_connection = True
+                text = f"nanotea failed on {self.command} {urlsplit(self.path).path}: {type(err).__name__}: {err}"
+                if urlsplit(self.path).path.startswith("/api/"):
+                    self._send(500, "application/json", json.dumps({"error": text}).encode())
+                else:
+                    self._send(500, "text/plain; charset=utf-8", (text + "\nThe traceback is in the service's log.\n")
+                               .encode())
+            raise
+
     def end_headers(self) -> None:
         # Every response, errors included: another site framing a paired page could steer the owner's taps.
         self.send_header("Content-Security-Policy", "frame-ancestors 'self'")
@@ -1544,6 +1568,9 @@ class Handler(BaseHTTPRequestHandler):
         return frozenset(names)
 
     def do_GET(self) -> None:
+        self._guard(self._do_get)
+
+    def _do_get(self) -> None:
         self.who = None
         if self._refuse_foreign():
             return
@@ -1801,6 +1828,9 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": f"not found: {path}"})
 
     def do_POST(self) -> None:
+        self._guard(self._do_post)
+
+    def _do_post(self) -> None:
         self.who = None
         # Read the whole body before answering: replying mid-upload resets the connection, and
         # Safari then shows only "Load failed" instead of the error. A file the owner attaches goes to disk as it

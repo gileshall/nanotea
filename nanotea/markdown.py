@@ -407,10 +407,10 @@ def _list(lines: list[str], i: int, clips: bool, depth: int) -> tuple[tuple, int
             body.append(line[width:])
             i += 1
         blank = 0
-        while body and body[-1] == "":
+        while len(body) > 1 and body[-1] == "":  # an empty item ("-" alone) keeps its one line
             body.pop()
             blank += 1
-        if "" in body:
+        if "" in body[1:]:
             tight = False
         checked = None
         if t := TASK.match(body[0]):
