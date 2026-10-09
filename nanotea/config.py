@@ -107,7 +107,7 @@ class Config(dict):
 
 
 # The service's own keys. The plugin tables ([rewrite], [tts], [stt], [control], [notify.<name>], [phone]) and
-# [theme], [audio], [bang] and [settings] are checked by what reads them, each against its own options.
+# [theme], [audio], [bang], [delivery] and [settings] are checked by what reads them, each against its own options.
 TOP = (
     Option("host", str, "The address the service listens on. 0.0.0.0 only if the proxy reaches it from another "
                         "host or container.", "127.0.0.1"),
@@ -124,7 +124,8 @@ TOP = (
     Option("plugin_path", list, "Directories, relative to the config's, whose modules plugins named "
                                 "\"module:Class\" may be in.", [], machine=True),
 )
-TABLES = ("app", "theme", "control", "rewrite", "tts", "stt", "notify", "audio", "settings", "bang", "phone")
+TABLES = ("app", "theme", "control", "rewrite", "tts", "stt", "notify", "audio", "settings", "bang", "delivery",
+          "phone")
 APP = (
     Option("name", str, "What the app calls itself: its title, home screen name and leaf.", "Nanotea"),
     Option("owner", str, "Who the messages are for: shown in the app, and what the rewriter and the agents call "

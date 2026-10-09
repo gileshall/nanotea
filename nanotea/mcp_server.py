@@ -7,6 +7,11 @@ Without a token, it asks the service for one (nanotea/enroll.py) under its --nam
 answers tool calls with what it waits on until the approver or the owner approves; it then collects the token and
 goes on. Until then it offers the tools of the default settings.
 
+How the owner's messages reach the agent is its delivery mode ([delivery], nanotea/delivery.py), which the service
+reports with every waiting count. The instructions say the mode the service gives at start (this machine's config
+before the session has a token); a result carries "delivery" when the agent has something new to learn of it: a
+change, or the command nanotea listen takes.
+
 Run: nanotea mcp [--name NAME [--line LINE] [--voice ID] [--channel NAME ...]] [--harness NAME]
      [--idle finish|wait|hook] [--wait-s N] [--bang]
 """
@@ -32,23 +37,23 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 
-from nanotea.bang import OWNER_ONLY_NOTE, Host
+from nanotea.bang import Host
 from nanotea.client import Client, NanoteaError, line_for, segment
 from nanotea import version
 from nanotea.config import load_config
 from nanotea.credentials import agent_token, ask, collect, token_file, waiting_on
-from nanotea import quirks
+from nanotea import delivery, quirks
+from nanotea.listen import command as listen_command
+from nanotea.mailbox import Mailbox, request_item
 from nanotea.relay import EXIT_UPGRADED, STATE_ENV
 from nanotea.settings import DEFAULTS, EVENT_SETTLE_S
-from nanotea.sop import IDLE_MODES, render
+from nanotea.sop import IDLE_MODES, delivery_line, render
 
 POLL_S = 2
 PROGRESS_S = 10
 WAIT_DEFAULT_S = quirks.Quirks.wait_s
 WAIT_MAX_S = 3600
 HEARTBEAT_S = 20
-TAP_NOTE = ("a tap on your control: text is your own words, which the owner picked, not words the owner wrote. "
-            "Never quote it back as theirs")
 # These end a wait at once.
 URGENT = {"message", "reaction", "tap", "answer", "failed", "set_aside", "agent", "request", "upgraded"}
 
@@ -79,6 +84,10 @@ class Agent:
         self.voice: str | None = None
         self.channels: list[str] = []
         self.rules_v: str | None = None  # the version of the rules this session was last given
+        self.told: str | None = None  # the delivery mode the agent knows all it needs of
+        self.modes: dict | None = None  # [delivery] as the service has it; None: not asked, so this config's
+        self.quirks = quirks.of(None)
+        self.harness: str | None = None
         self.session = secrets.token_hex(8)
         self.listener = f"mcp pid {os.getpid()}"
         self.instructions: str | None = None  # the working agreement this server gave at initialize
@@ -138,13 +147,13 @@ class Agent:
     def talk(self) -> bool:
         return self.settings["agent_messages"] != "off"
 
-    def _register(self, name: str, line: str) -> None:
+    def _register(self, name: str, line: str, channels: list[str]) -> None:
         self.client.post("/api/sessions", {"name": name, "session": self.session, "pid": os.getpid(), "line": line,
-                                           "bang": self.bang})
+                                           "bang": self.bang, "channels": channels})
 
     def _reregister(self) -> None:
         with self._lock:
-            self._register(self.name, self.line)
+            self._register(self.name, self.line, self.channels)
 
     def join(self, name: str, line: str | None, voice: str | None, about: str | None,
              channels: list[str]) -> dict:
@@ -167,10 +176,10 @@ class Agent:
                 raise ValueError(f"no channel #{c}; call channels for the list")
         with self._lock:
             # The session first: with one session per agent on, a second one stops here, before taking the line.
-            if (self.name, self.line) != (name, line):
+            if (self.name, self.line, self.channels) != (name, line, list(channels)):
                 if self.name is not None and self.name != name:
                     self.client.post(f"/api/sessions/{self.session}/close", {})
-                self._register(name, line)
+                self._register(name, line, list(channels))
             if self.line not in (None, line):
                 self.client.post(f"/api/{segment(self.line)}", {"name": self.name, "open": False})
             info = self.client.post(f"/api/{segment(line)}", {"name": name, "about": about, "open": True})
@@ -211,7 +220,7 @@ class Agent:
                 # The service restarted and forgot the session.
                 try:
                     with self._lock:
-                        self._register(self.name, self.line)
+                        self._register(self.name, self.line, self.channels)
                     print("nanotea mcp: the service forgot this session; registered it again", file=sys.stderr,
                           flush=True)
                 except NanoteaError as again:
@@ -279,42 +288,8 @@ class Agent:
 
     def gather(self, idle: bool) -> tuple[list[dict], list[tuple[str, dict]]]:
         """Everything new for this agent, oldest first, and the receipts that mark it delivered."""
-        name = self.need()
-        items: list[dict] = list(self.local)
-        receipts: list[tuple[str, dict]] = []
-        seg = segment(self.line)
-        pending = self.client.get(f"/api/{seg}/pending", name=name, idle=1 if idle else None)
-        if pending:
-            receipts.append((f"/api/{seg}/delivered",
-                             {"name": name, "ids": [m["id"] for m in pending], "listener": self.listener}))
-            items += [_inbox_item(m, self.line) for m in pending]
-        for c in self.channels:
-            pending = self.client.get(f"/api/channels/{c}/pending", name=name)
-            if pending:
-                receipts.append((f"/api/channels/{c}/delivered",
-                                 {"name": name, "ids": [m["id"] for m in pending], "listener": self.listener}))
-                # Answers to this agent's own questions come below, wherever they were asked.
-                items += [_channel_item(m, c) for m in pending
-                          if not (m["kind"] == "answer" and m["re"]["sender"] == name)]
-        asking = self.client.get("/api/enroll", new=1)  # none unless this is the approver
-        if asking:
-            receipts.append(("/api/enroll/told", {"ids": [r["id"] for r in asking]}))
-            items += [_request_item(r) for r in asking]
-        agent = f"/api/agents/{quote(name, safe='')}"
-        answers = self.client.get(f"{agent}/answers")
-        if answers:
-            receipts.append((f"{agent}/answers/delivered",
-                             {"ids": [a["id"] for a in answers], "listener": self.listener}))
-            items += [_answer_item(a) for a in answers]
-        # Always taken: messages sent while agent messages were on still arrive after they go off.
-        talk = self.client.get("/api/talk/pending", name=name)
-        if talk:
-            receipts.append(("/api/talk/delivered",
-                             {"name": name, "ids": [m["id"] for m in talk], "listener": self.listener}))
-            items += [{"kind": "agent", "from": m["from"], "at": m["at"], "id": m["id"], "text": m["text"]}
-                      for m in talk]
-        items.sort(key=lambda it: it["at"])
-        return items, receipts
+        items, receipts = Mailbox(self.client, self.need(), self.line, self.channels, self.listener).gather(idle)
+        return sorted(self.local + items, key=lambda it: it["at"]), receipts
 
     def take(self, idle: bool) -> list[dict]:
         """Everything new for this agent, oldest first, marked delivered."""
@@ -323,6 +298,26 @@ class Agent:
             self.client.post(path, body)
         self.local = [it for it in self.local if it not in items]
         return items
+
+    def can(self, mode: str) -> bool:
+        """Whether this harness can do mode; with no harness named, nothing says it can't."""
+        return mode == "pull" or self.harness is None or getattr(self.quirks, mode)
+
+    def cannot(self, mode: str) -> str:
+        return (f"[delivery] gives {self.name or 'agents'} mode {mode}, which {self.harness} can't do "
+                f"(nanotea/quirks.py)")
+
+    def delivery(self, mode: str, brief: bool) -> dict:
+        """What the agent needs to know of mode, which it hasn't been told."""
+        if not self.can(mode):
+            print(f"nanotea mcp: {self.cannot(mode)}; nothing will hand {self.owner}'s messages over", file=sys.stderr,
+                  flush=True)
+            return {"mode": mode, "text": f"{self.cannot(mode)}: nothing hands {self.owner}'s messages to you. Take "
+                                          f"them with check and wait, and tell {self.owner} the mode can't work here."}
+        out = {"mode": mode, "text": f"Your delivery mode is {mode}: " + delivery_line(self.owner, mode, brief)}
+        if mode == "listen":
+            out["listen"] = listen_command(self.name, self.line)
+        return out
 
     def wakes(self, items: list[dict]) -> bool:
         """Whether what has come ends a wait now: the owner's words and answers, agents' messages, and (with the
@@ -336,105 +331,6 @@ class Agent:
                 return True
         return False
 
-
-def _request_item(r: dict) -> dict:
-    """A request for a token, for the approver to decide."""
-    what = f"events to line {r['line']}" if r["kind"] == "events" else (
-        f"an agent bound to line {r['line']}" if r["line"] else "an agent")
-    had = f"; it had a token, revoked {r['had']}" if r["had"] else ""
-    return {"kind": "request", "id": r["id"], "at": r["asked"], "from": r["name"],
-            "text": f"{r['name']!r} asks for a token as {what}, from directory {r['dir'] or '(none given)'}, from "
-                    f"address {r['from']}{had}. Decide it with decide"}
-
-
-def _voice(m: dict, audio_path: str | None) -> dict:
-    """takes: the recordings as made (audio_path is several joined), each with what the microphone did."""
-    if m["transcript_status"] == "failed":
-        return {"transcript": None, "error": m["transcript_error"], "audio_path": audio_path, "takes": m["takes"]}
-    return {"transcript": m["transcript"], "audio_path": audio_path, "takes": m["takes"]}
-
-
-def _files(m: dict) -> list[dict]:
-    return [{"path": f["path"], "type": f["type"], "size": f["size"], "name": f["name"]} for f in m.get("files", [])]
-
-
-def _inbox_item(m: dict, line: str) -> dict:
-    if ev := m.get("event"):
-        return {"kind": "event", "from": ev["source"], "at": m["at"], "id": m["id"], "line": line,
-                "event": ev["kind"], "text": ev["summary"], "data": ev["data"]}
-    if b := m.get("bang"):
-        return _bang_item(m, b, line)
-    item = {"kind": _owner_kind(m), "from": "owner", "at": m["at"], "id": m["id"],
-            "line": line, "text": m["text"], "files": _files(m)}
-    _tap(item, m)
-    if m["re"]:
-        item["re"] = {**m["re"], "url": m["re_url"]}
-    if m["audio"]:
-        item["voice"] = _voice(m, m["audio_path"])
-    return item
-
-
-def _bang_item(m: dict, b: dict, line: str) -> dict:
-    """A command the owner ran on this machine with !, and what it did. Only ones that ran reach an agent."""
-    item = {"kind": "bang", "from": "owner", "at": m["at"], "id": m["id"], "line": line, "command": b["command"],
-            "cwd": b["cwd"], "exit": b["exit"], "stdout": b["stdout"], "stderr": b["stderr"],
-            "truncated": b["truncated"], "duration_s": b["duration_s"], "timed_out": b["timed_out"],
-            "full_output": b["full_output"], "note": OWNER_ONLY_NOTE}
-    if b["signal"]:
-        item["signal"] = b["signal"]
-    if b["lingering"]:
-        item["lingering"] = True
-    return item
-
-
-def _owner_kind(m: dict) -> str:
-    return "reaction" if m.get("reaction") else "tap" if m.get("tap") else "message"
-
-
-def _tap(item: dict, m: dict) -> None:
-    """What the owner tapped on a control: the control and the facts it reports."""
-    if t := m.get("tap"):
-        item["tap"] = {"control": t["control"], "data": t["data"]}
-        item["note"] = TAP_NOTE
-
-
-def _answer_item(a: dict) -> dict:
-    if a["kind"] == "failed":
-        return {"kind": "failed", "from": "nanotea", "at": a["at"], "id": a["id"], "re": a["re"],
-                "text": f"Your question failed to send: {a['error']}"}
-    if a["kind"] == "set_aside":
-        return {"kind": "set_aside", "from": "nanotea", "at": a["at"], "id": a["id"], "re": a["re"], "text": a["text"]}
-    item = {"kind": "answer", "from": "owner", "at": a["at"], "id": a["id"], "re": a["re"], "text": a["text"],
-            "files": _files(a)}
-    if a["reaction"]:
-        item["reaction"] = True
-    _tap(item, a)
-    if a["audio"]:
-        item["voice"] = _voice(a, a["audio_path"])
-    return item
-
-
-def _channel_item(m: dict, channel: str) -> dict:
-    if m["kind"] == "post":
-        item = {"kind": "post", "from": m["from"], "at": m["at"], "id": m["id"], "channel": channel,
-                "title": m["title"], "text": m["text"], "asks_owner": m["ask"], "clips": m["clips"], "url": m["url"]}
-        if m["re"]:
-            item["re"] = m["re"]
-        return item
-    if m["kind"] == "answer":
-        item = {"kind": "answer", "from": "owner", "at": m["at"], "id": m["id"], "channel": channel,
-                "re": {**m["re"], "url": m["re_url"]}, "text": m["text"], "files": _files(m)}
-    else:
-        item = {"kind": _owner_kind(m), "from": "owner", "at": m["at"],
-                "id": m["id"], "channel": channel, "text": m["text"], "files": _files(m)}
-        if m["re"]:
-            item["re"] = {**m["re"], "url": m["re_url"]}
-    if m.get("reaction"):
-        item["reaction"] = True
-    _tap(item, m)
-    if m["audio"]:
-        item["voice"] = _voice(m, m["audio_path"])
-    return item
 
 
 RE_DOC = """
@@ -464,10 +360,11 @@ def build(cfg: dict, preset: argparse.Namespace) -> tuple[MCPServer, Agent]:
     if it has none and joins once it is approved."""
     path = token_file(preset.name)
     client = Client(cfg["port"], agent_token(preset.name) if path is not None and path.exists() else None)
-    settings, stale = None, None
+    settings, stale, modes = None, None, None
     if client.credential is not None:
         try:
-            settings = client.get("/api/settings")["settings"]
+            view = client.get("/api/settings")
+            settings, modes = view["settings"], view["delivery"]
         except NanoteaError as err:
             if err.status != 401:
                 raise
@@ -479,6 +376,7 @@ def build(cfg: dict, preset: argparse.Namespace) -> tuple[MCPServer, Agent]:
     settings["bang"] = settings["bang"] and preset.bang
     agent = Agent(client, cfg["app"]["owner"], settings, preset.bang, cfg, preset)
     agent.stale = stale
+    agent.modes = modes
     client.before = agent.ready
     if preset.name and client.credential is not None:
         agent.join(preset.name, preset.line, preset.voice, None, preset.channel)
@@ -495,7 +393,14 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
     settings = agent.settings
     wait_default = preset.wait_s
     most = preset.quirks.instructions_max
-    agent.instructions = render(owner, settings, agent.name, agent.line, preset.idle, brief=most is not None)
+    agent.quirks, agent.harness = preset.quirks, preset.harness
+    mode = delivery.mode_for(delivery.settings(cfg) if agent.modes is None else agent.modes, agent.name)
+    if not agent.can(mode):
+        raise ValueError(f"{agent.cannot(mode)}; set [delivery] agents.{preset.name or 'NAME'} = \"pull\", or a "
+                         f"mode it can do")
+    agent.told = None if mode == "listen" else mode  # listen: the first result gives the command
+    agent.instructions = render(owner, settings, agent.name, agent.line, preset.idle, brief=most is not None,
+                                mode=mode)
     if most is not None and len(agent.instructions) > most:
         raise ValueError(f"the brief working agreement is {len(agent.instructions)} characters, over the {most} "
                          f"{preset.harness} keeps; turn off agreement settings this agent doesn't need "
@@ -530,6 +435,9 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
         if settings["rules"] and agent.name is not None and w["rules_v"] != agent.rules_v and "rules" not in out:
             out["rules"] = await call(agent.take_rules)
             out["rules_changed"] = True
+        if agent.name is not None and w["delivery"] != agent.told:
+            out["delivery"] = agent.delivery(w["delivery"], most is not None)
+            agent.told = w["delivery"]
         return out
 
     @mcp.tool()
@@ -617,7 +525,7 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
         """For the approver only: the agents and programs asking for a token, waiting on your decision. Each also
         arrives once through check or wait, as kind "request"."""
         out = await call(agent.client.get, "/api/enroll")
-        return await result(requests=[_request_item(r) for r in out])
+        return await result(requests=[request_item(r) for r in out])
 
     @mcp.tool()
     async def decide(id: str, approve: bool, reason: str | None = None) -> dict[str, Any]:

@@ -3,6 +3,7 @@ harness configs are the user's.
 
 nanotea setup HARNESS --name NAME [--line LINE] [--voice ID] [--channel NAME ...] [--bang]
 nanotea sop [--name NAME] [--line LINE] [--harness NAME] [--idle MODE] [--bang] [--skill]
+The agreement says the delivery mode the service gives NAME, or every agent without one.
 """
 
 import argparse
@@ -13,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from nanotea import quirks
+from nanotea import delivery, quirks
 from nanotea.client import Client, NanoteaError, line_for
 from nanotea.config import CONFIG, load_config
 from nanotea.credentials import owner_key, token_path
@@ -48,6 +49,9 @@ def _json(obj) -> str:
 
 HELD_NOTE = ("Permission prompts: these show {owner} when the agent is stopped at a prompt asking for "
              "permission, and when it gets past it. They decide nothing.")
+PUSH_NOTE = ("After each tool call, push hands the agent what is waiting for it, mid-task, when its delivery mode "
+             "is push ([delivery] in the service's config); in other modes it only does the permission prompts' part. "
+             "It runs before the agent's next step, so it is not async.")
 
 
 def _toml_list(items: list[str]) -> str:
@@ -76,13 +80,12 @@ Code wakes the agent when a hook times out.
 
 {_json(rewake)}
 
-{HELD_NOTE}
+{HELD_NOTE} {PUSH_NOTE}
 
 {_json({"hooks": {
     "PermissionRequest": [{"hooks": [{"type": "command", "command": a.hook("held"), "timeout": 10}]}],
-    "PostToolUse": [{"hooks": [{"type": "command", "command": a.hook("clear"), "async": True, "timeout": 10}]}],
-    "PostToolUseFailure": [{"hooks": [{"type": "command", "command": a.hook("clear"), "async": True,
-                                       "timeout": 10}]}],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": a.hook("push"), "timeout": 10}]}],
+    "PostToolUseFailure": [{"hooks": [{"type": "command", "command": a.hook("push"), "timeout": 10}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": a.hook("clear"), "timeout": 10}]}]}})}
 
 Headless runs (claude -p) don't run background hooks or ask permission. Use the plain stop hook there instead, which sends the
@@ -357,11 +360,12 @@ def sop(argv: list[str]) -> None:
     cfg = load_config()
     owner = cfg["app"]["owner"]
     try:
-        settings = Client(cfg["port"], owner_key(cfg)).get("/api/settings")["settings"]
+        view = Client(cfg["port"], owner_key(cfg)).get("/api/settings")
     except NanoteaError as err:
         sys.exit(f"nanotea sop: the agreement follows the service's settings, so it needs the service: {err}")
+    settings = view["settings"]
     settings["bang"] = settings["bang"] and a.bang
     q = quirks.of(a.harness)
     body = render(owner, settings, a.name, (a.line or line_for(a.name)) if a.name else None, a.idle or q.idle,
-                  brief=q.instructions_max is not None)
+                  brief=q.instructions_max is not None, mode=delivery.mode_for(view["delivery"], a.name))
     print((SKILL_HEAD.format(owner=owner) if a.skill else "## Nanotea\n\n") + body, end="")

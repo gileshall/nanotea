@@ -144,6 +144,14 @@ to = "+10000000000"  # phone number or Apple ID email
 # output_kb = 30          # per stream (stdout, stderr), what the agent and the page get; the first and last half (1 to 1024)
 # keep_mb = 16            # per stream, how much is kept whole on disk under data/bang/<id>/ (1 to 512)
 
+# --- Delivery: how your messages reach each agent ------------------------------------------------------------------
+[delivery]
+# Every mode keeps check and wait. pull: the agent takes them with check and wait, and the stop and wake hooks send
+# it back. push: a hook after each of its tool calls hands them over mid-task (Claude Code; nanotea setup installs
+# it). listen: the agent keeps nanotea listen running in the background, which exits with them (Claude Code).
+# mode = "pull"            # pull, push or listen
+# agents = {}              # a mode for particular agents, by name: { desk = "push", builder = "listen" }
+
 # --- Your switches' starting values --------------------------------------------------------------------------------
 [settings]
 # What the switches on the Settings page start as on a new install. After that, what you change there (kept in

@@ -15,6 +15,7 @@ USAGE = """usage: nanotea COMMAND [ARGS]
   sop          print the working agreement for agents: an AGENTS.md section, or an Agent Skill (--skill)
   mcp          the MCP server for one agent session, over stdio (nanotea mcp --help)
   hook         harness hooks that bring an agent back to the owner's messages (nanotea hook --help)
+  listen       for an agent in listen mode: run in the background, exits with the owner's messages
   leaf         a name's leaf, as the app draws it: SVG, PNG or traits (nanotea leaf --help)
   kokoro       fetch the local Kokoro voice's model files: nanotea kokoro download
   plugins      list the control, voice, transcription, rewrite, notify and phone plugins; --check builds the configured ones
@@ -55,6 +56,9 @@ def main() -> None:
     elif cmd == "hook":
         from nanotea.hook import main as hook
         hook(rest)
+    elif cmd == "listen":
+        from nanotea.listen import main as listen
+        listen(rest)
     elif cmd == "leaf":
         from nanotea.leaf import main as leaf
         leaf(rest)

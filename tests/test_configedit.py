@@ -191,6 +191,8 @@ class Service(Case):
         for changes, says in (([{"table": [], "key": "port", "value": 0}], "port"),
                               ([{"table": ["audio"], "key": "format", "value": "wma"}], "format"),
                               ([{"table": ["tts", "command"], "key": "nope", "value": 1}], "nope"),
+                              ([{"table": ["delivery"], "key": "agents", "value": {"desk": "shout"}}],
+                               "'desk' has mode 'shout'"),
                               ([{"table": [], "key": "public_url", "value": "https://x.test/path"}], "public_url")):
             with self.subTest(changes=changes):
                 status, out = self.save(changes)

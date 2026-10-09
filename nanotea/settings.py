@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nanotea.config import ConfigError
-from nanotea.sop import INTRO, JOIN, lines, on
+from nanotea.sop import ALWAYS, INTRO, JOIN, lines, on
 
 OPTIONAL_TOOLS = ("react", "status", "typing", "channels", "board", "history", "controls", "thread")
 AGENT_MESSAGES = ("off", "shown", "hidden")
@@ -221,7 +221,7 @@ def costs(owner: str, tool_defs: dict[str, dict], rules: list[dict], plain: dict
     by: dict[str, int] = {}
     base = tokens(INTRO.format(owner=owner)) + tokens(JOIN)
     for feature, text in lines(owner, everything, "finish"):
-        if feature in (None, "idle"):
+        if feature in ALWAYS:
             base += tokens(text)
         else:
             by[feature] = by.get(feature, 0) + tokens(text)

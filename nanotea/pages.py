@@ -3910,14 +3910,17 @@ def prompts_page(view: dict) -> str:
     lines = "".join(f'<tr class="{"" if x["on"] else "off"}"><td>{e(x["text"])}</td><td>{e(x["added_by"])}'
                     f'{"" if x["on"] else ", off now"}</td></tr>' for x in a["lines"])
     idle = "".join(f'<p class="meta"><b>{e(k)}</b>: {e(v)}</p>' for k, v in a["idle"].items())
+    modes = "".join(f'<p class="meta"><b>{e(k)}</b>: {e(v)}</p>' for k, v in a["delivery"].items())
     agreement = (
         '<h2 id="agreement">Working agreement</h2>'
         f'<p class="meta">What every agent is told when it joins, with {owner} filled in, as your switches are '
-        'now (Settings, Agents) and for a session that ends its turn with check. Your standing rules come '
+        'now (Settings, Agents), for a session in pull mode that ends its turn with check. Your standing rules come '
         'after it. Not editable here: change the switches, or add a rule.</p>'
         f'<pre>{e(a["text"])}</pre>'
         f'<details><summary>Every line, and what adds it</summary><table class="lines">{lines}</table>'
-        f'<p class="meta">The idle line depends on how the session waits:</p>{idle}</details>'
+        f'<p class="meta">The idle line depends on how the session waits:</p>{idle}'
+        f'<p class="meta">The delivery line depends on the agent\'s mode (Configuration, Delivery):</p>{modes}'
+        '</details>'
         f'<details><summary>The brief form ({len(a["brief"])} of {a["brief_max"]} characters)</summary>'
         '<p class="meta">Some harnesses keep only so much of what a server tells the agent, so their sessions get '
         'the same rules in fewer words: '

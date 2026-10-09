@@ -311,7 +311,7 @@ HOST_ONLY = ("bang", "config_programs")  # switches only the host key turns on, 
 def check_all(raw: dict, env: dict) -> None:
     """Everything the service checks of its config before it listens, without starting it. Raises what it would
     stop with."""
-    from nanotea import audio, bang, plugins, settings
+    from nanotea import audio, bang, delivery, plugins, settings
     from nanotea.board import BoardError, check_groups
     from nanotea.config import ConfigError, check, resolve
     from nanotea.push import PushBook
@@ -320,6 +320,7 @@ def check_all(raw: dict, env: dict) -> None:
     themes_from_config(cfg)
     audio.settings(cfg)
     bang.settings(cfg)
+    delivery.settings(cfg)
     if cfg.get("settings"):
         try:
             settings.check(cfg["settings"], "[settings] ")

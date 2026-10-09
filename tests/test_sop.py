@@ -3,7 +3,7 @@ harnesses that cut a server's instructions keep."""
 
 import unittest
 
-from nanotea import quirks, setup, sop
+from nanotea import delivery, quirks, setup, sop
 from nanotea.client import Client
 from nanotea.mcp_server import Agent, make, options
 from nanotea.settings import DEFAULTS
@@ -24,6 +24,10 @@ class Quirks(unittest.TestCase):
         a = options([])
         self.assertEqual((a.harness, a.idle, a.wait_s, a.quirks), (None, "finish", 50, quirks.Quirks()))
 
+    def test_only_claude_is_known_to_push_and_listen(self):
+        self.assertEqual({h for h, q in quirks.QUIRKS.items() if q.push or q.listen}, {"claude"})
+        self.assertTrue(quirks.QUIRKS["claude"].push and quirks.QUIRKS["claude"].listen)
+
     def test_brief_max_is_the_tightest_harness(self):
         self.assertEqual(sop.BRIEF_MAX, min(q.instructions_max for q in quirks.QUIRKS.values()
                                             if q.instructions_max))
@@ -31,21 +35,35 @@ class Quirks(unittest.TestCase):
 
 class Brief(unittest.TestCase):
     def test_it_fits_with_everything_on_and_long_names(self):
-        for idle in sop.IDLE_MODES:
-            for name, line in ((None, None), ("N" * 64, "L" * 64)):
-                with self.subTest(idle=idle, joined=bool(name)):
-                    text = sop.render("O" * 24, EVERYTHING, name, line, idle, brief=True)
-                    self.assertLessEqual(len(text), sop.BRIEF_MAX)
+        for mode in delivery.MODES:
+            for idle in sop.IDLE_MODES:
+                for name, line in ((None, None), ("N" * 64, "L" * 64)):
+                    with self.subTest(mode=mode, idle=idle, joined=bool(name)):
+                        text = sop.render("O" * 24, EVERYTHING, name, line, idle, brief=True, mode=mode)
+                        self.assertLessEqual(len(text), sop.BRIEF_MAX)
 
     def test_every_line_has_a_brief_form(self):
         for f, text, short in sop.LINES:
             # Only a line that is always there may leave its rule to another line's brief form.
-            if f != "idle" and not short:
+            if f not in ("idle", "delivery") and not short:
                 self.assertIsNone(f, text)
+        for mode in delivery.MODES:
+            self.assertTrue(sop.DELIVERY[mode] and sop.BRIEF_DELIVERY[mode])
+
+    def test_the_mode_picks_the_delivery_line(self):
+        for mode in delivery.MODES:
+            for brief in (False, True):
+                with self.subTest(mode=mode, brief=brief):
+                    text = sop.render("Robin", EVERYTHING, brief=brief, mode=mode)
+                    for other in delivery.MODES:
+                        line = sop.delivery_line("Robin", other, brief)
+                        (self.assertIn if other == mode else self.assertNotIn)(line, text)
+        with self.assertRaisesRegex(ValueError, "mode must be one of pull, push, listen, not 'poll'"):
+            sop.render("Robin", EVERYTHING, mode="poll")
 
     def test_a_setting_drops_its_brief_line(self):
         for f, _, short in sop.LINES:
-            if f in (None, "idle"):
+            if f in sop.ALWAYS:
                 continue
             off = {**EVERYTHING, "tools": dict(EVERYTHING["tools"])}
             if f.startswith("tools."):

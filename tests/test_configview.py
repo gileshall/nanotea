@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from harness import ROOT, Case
-from nanotea import audio, bang, configview, plugins, settings, themes
+from nanotea import audio, bang, configview, delivery, plugins, settings, themes
 from nanotea.config import APP, NOTIFY, TOP, ConfigError
 from nanotea.prompts import Prompts, PromptError
 
@@ -35,7 +35,7 @@ def declared() -> set[tuple[str, str]]:
     """(table, key) for every key the service takes in a table it documents."""
     out = {("", o.key) for o in TOP} | {("app", o.key) for o in APP} | {("notify", o.key) for o in NOTIFY}
     out |= {("theme", o.key) for o in themes.OPTIONS} | {("audio", o.key) for o in audio.OPTIONS}
-    out |= {("bang", o.key) for o in bang.OPTIONS}
+    out |= {("bang", o.key) for o in bang.OPTIONS} | {("delivery", o.key) for o in delivery.OPTIONS}
     out -= {("theme", "custom")}
     out |= {("settings", s.key) for s in settings.SCHEMA} | {("settings", "tools")}
     out |= {("control", "use"), ("rewrite", "backend"), ("tts", "backend"), ("stt", "backend"),

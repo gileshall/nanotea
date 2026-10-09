@@ -33,8 +33,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from nanotea import (audio, bang, configedit, configview, controls, export, files, leaf, markdown, pages, plugins,
-                     version)
+from nanotea import (audio, bang, configedit, configview, controls, delivery, export, files, leaf, markdown, pages,
+                     plugins, version)
 from nanotea.board import Board, BoardError
 from nanotea.channels import NAME, ChannelError, Channels
 from nanotea.config import CONFIG, Config, ConfigError, load_config, load_env_file, parse_env, resolve
@@ -382,6 +382,7 @@ class App:
         self.settings = SettingsBook(self.store.root, cfg.get("settings"))
         # Bang commands: queued ones by message id -> {box, state, queued, expire_s, timeout_s, session, started}.
         self.bang_cfg = bang.settings(cfg)
+        self.delivery = delivery.settings(cfg)
         self.bang_dir = self.store.root / "bang"
         self.bang_log = self.store.root / "bang-log.jsonl"
         self.bang_cond = threading.Condition()
@@ -420,9 +421,11 @@ class App:
             live = [{**s, "session": sid} for sid, s in self.sessions.items()]
         return sorted((s for s in live if name is None or s["name"] == name), key=lambda s: s["since"])
 
-    def open_session(self, name: str, sid: str, pid: int, line: str, bang: bool = False) -> dict:
+    def open_session(self, name: str, sid: str, pid: int, line: str, bang: bool = False,
+                     channels: list[str] | None = None) -> dict:
         """Registers a session; refused while another of the same agent's is live and one_session is on. bang: its
-        process was started with the local opt-in to run the owner's bang commands."""
+        process was started with the local opt-in to run the owner's bang commands. channels: those it listens in,
+        for the push hook and nanotea listen, which take for it from outside the session."""
         with self.presence_lock:
             held = self.sessions.get(sid)
         if held is not None and held["name"] != name:
@@ -438,10 +441,15 @@ class App:
             if s is not None and s["name"] != name:
                 raise SessionError(403, f"session {sid} is another agent's; start yours with a new id")
             s = self.sessions[sid] = {"name": name, "line": line, "pid": pid, "bang": bang,
+                                      "channels": list(channels or []),
                                       "since": s["since"] if s and s["name"] == name else now_iso(),
                                       "beat": time.monotonic()}
         log.info("session %s of %s opened (pid %d, line %s%s)", sid, name, pid, line, ", bang" if bang else "")
         return dict(s)
+
+    def channels_of(self, name: str) -> list[str]:
+        """The channels name's open sessions listen in."""
+        return sorted({c for s in self.open_sessions(name) for c in s["channels"]})
 
     def beat(self, sid: str) -> None:
         with self.presence_lock:
@@ -791,7 +799,7 @@ class App:
                          f"machine nanotea runs on, with nanotea bang on; off from anywhere.",
                  "config_programs": " Turned on only from the machine nanotea runs on, with nanotea config programs "
                                     "on; off from anywhere."}
-        return {"settings": now, "costs": c, "session_tokens": session_total(c, now),
+        return {"settings": now, "costs": c, "session_tokens": session_total(c, now), "delivery": self.delivery,
                 "bang_sessions": sorted({s["name"] for s in self.open_sessions() if s["bang"]}, key=_plain),
                 "features": [{"key": k, "label": label, "about": about_ + about.get(k, "")}
                              for k, label, about_ in FEATURES],
@@ -2799,8 +2807,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"approver": approver})
 
     def _open_session(self, raw: bytes) -> None:
-        """An MCP server's session starts, or registers again: {name, session, pid, line, bang}. bang: it was started
-        with the local opt-in to run the owner's bang commands."""
+        """An MCP server's session starts, or registers again: {name, session, pid, line, bang, channels}. bang: it
+        was started with the local opt-in to run the owner's bang commands. channels: those it listens in."""
         try:
             body = json.loads(raw)
             name, sid, pid, line = body["name"], body["session"], body["pid"], body["line"]
@@ -2815,7 +2823,10 @@ class Handler(BaseHTTPRequestHandler):
             opted = body.get("bang", False)
             if not isinstance(opted, bool):
                 raise ValueError("'bang' must be true or false")
-            session = self.app.open_session(name.strip(), sid, pid, line, opted)
+            channels = body.get("channels", [])
+            if not (isinstance(channels, list) and all(isinstance(c, str) for c in channels)):
+                raise ValueError("'channels' must be a list of channel names")
+            session = self.app.open_session(name.strip(), sid, pid, line, opted, channels)
         except SessionError as err:
             return self._json(err.status, {"error": str(err)})
         except (KeyError, TypeError, ValueError) as err:
@@ -3187,11 +3198,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _agent_get(self, agent: str, what: str, query: dict) -> None:
         """answers: the agent's undelivered answers (see answers). waiting: how much of the owner's is ready for
-        it, without taking it: {line, answers, bang, total, ids}; bang counts the commands' results, which are in
-        neither total nor ids: they don't wake an agent. ?line=<segment> counts that inbox too, if it holds it, and
-        with &idle=1 says the agent is idle and listening there (a wake hook waiting on its behalf)."""
+        it, without taking it: {line, answers, bang, total, ids, delivery, channels}; bang counts the commands'
+        results, which are in neither total nor ids: they don't wake an agent. delivery: its mode ([delivery]);
+        channels: those its sessions listen in. ?line=<segment> counts that inbox too, if it holds it; with &idle=1
+        says the agent is idle and listening there (a wake hook waiting on its behalf), and with &listen=1 only
+        that something listens for it there (nanotea listen, while the agent may be at work)."""
         if what == "answers":
             return self._json(200, self.app.answers(agent))
+        idle, listening = query.get("idle", [""])[0] == "1", query.get("listen", [""])[0] == "1"
         line: list[str] = []
         if seg := query.get("line", [""])[0]:
             box = box_of_segment(seg)
@@ -3207,15 +3221,16 @@ class Handler(BaseHTTPRequestHandler):
             pending = [m for m in pending if not m.get("bang")]
             line = [m["id"] for m in pending]
             events = sum(1 for m in pending if m.get("event"))
-            if query.get("idle", [""])[0] == "1":
+            if idle or listening:
                 self.app.last_listen[box] = time.monotonic()
-                self.app.idle_at[box] = datetime.now().astimezone()
                 self.app.listened.saw(agent)
-        elif query.get("idle", [""])[0] == "1":
-            return self._json(400, {"error": "idle=1 needs line"})
+            if idle:
+                self.app.idle_at[box] = datetime.now().astimezone()
+        elif idle or listening:
+            return self._json(400, {"error": "idle=1 and listen=1 need line"})
         else:
             events = bangs = 0
-        if query.get("idle", [""])[0] != "1":  # a wake hook polls while the agent sleeps; that isn't the agent
+        if not (idle or listening):  # a wake hook or listener polls on the agent's behalf; that isn't the agent
             self.app.active(agent)
         answers = [a["id"] for a in self.app.answers(agent)]
         talk = [m["id"] for m in self.app.talk.pending(agent)]
@@ -3223,7 +3238,9 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"line": len(line), "answers": len(answers), "talk": len(talk), "events": events,
                          "bang": bangs,
                          "total": len(line) + len(answers) + len(talk), "ids": line + answers + talk,
-                         "rules_v": self.app.rules.version(rules)})
+                         "rules_v": self.app.rules.version(rules),
+                         "delivery": delivery.mode_for(self.app.delivery, agent),
+                         "channels": self.app.channels_of(agent)})
 
     def _answers_delivered(self, agent: str, raw: bytes) -> None:
         """{ids, listener}: the asker was given these questions' outcomes. aside-<id>: told it was set aside."""

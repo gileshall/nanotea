@@ -13,8 +13,11 @@ held: the harness is asking for permission (Claude Code and Codex PermissionRequ
 owner sees the agent held at a prompt. It decides nothing: exit 0, no output.
 clear: the agent got past the prompt (PostToolUse, AfterTool, UserPromptSubmit). Calls the service only if held
 ran since the last clear.
+push: clear, and when the agent's delivery mode is push ([delivery], nanotea/delivery.py), hands it what is
+waiting: Claude Code's PostToolUse adds a hook's additionalContext to what the model sees next, mid-task. Run
+synchronously: an async hook's output reaches nobody.
 
-nanotea hook stop|rewake|held|clear --name NAME [--line LINE] [--harness cursor|...]
+nanotea hook stop|rewake|held|clear|push --name NAME [--line LINE] [--harness cursor|...]
 """
 
 import argparse
@@ -31,6 +34,7 @@ from nanotea import version
 from nanotea.client import Client, NanoteaError, line_for, segment
 from nanotea.config import load_config
 from nanotea.credentials import agent_token
+from nanotea.mailbox import Mailbox, handed
 from nanotea.settings import EVENT_SETTLE_S
 
 POLL_S = 3
@@ -39,8 +43,9 @@ REPEAT_S = 120
 HARNESSES = ("claude", "codex", "gemini", "vscode", "cursor")
 
 
-def waiting(client: Client, name: str, line: str, idle: bool = False) -> dict:
-    return client.get(f"/api/agents/{quote(name, safe='')}/waiting", line=segment(line), idle=1 if idle else None)
+def waiting(client: Client, name: str, line: str, idle: bool = False, listen: bool = False) -> dict:
+    return client.get(f"/api/agents/{quote(name, safe='')}/waiting", line=segment(line), idle=1 if idle else None,
+                      listen=1 if listen else None)
 
 
 def note(owner: str, w: dict) -> str:
@@ -98,6 +103,22 @@ def stop(client: Client, held: Held, owner: str, name: str, line: str, harness: 
     return 2
 
 
+def push(client: Client, held: Held, owner: str, name: str, line: str) -> int:
+    event = json.loads(sys.stdin.read() or "{}")
+    hook_event = event.get("hook_event_name")
+    if not hook_event:
+        raise ValueError("push reads the harness's hook event on stdin, and this one has no hook_event_name")
+    held.clear(client, name)
+    w = waiting(client, name, line)
+    if w["delivery"] != "push" or not (w["total"] or w["bang"]):
+        return 0
+    items = Mailbox(client, name, line, w["channels"], f"push hook pid {os.getpid()}").take(False)
+    if items:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": hook_event,
+                                                 "additionalContext": handed(owner, items, "push")}}))
+    return 0
+
+
 class Woken:
     """The items this agent was last woken for, and when, kept between rewake runs."""
 
@@ -143,7 +164,7 @@ def rewake(client: Client, held: Held, woken: Woken, owner: str, name: str, line
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="nanotea hook",
                                 description="Harness hooks that bring an agent back to the owner's messages.")
-    p.add_argument("mode", choices=["stop", "rewake", "held", "clear"])
+    p.add_argument("mode", choices=["stop", "rewake", "held", "clear", "push"])
     p.add_argument("--name", required=True, help="the agent's name, as it joins")
     p.add_argument("--line", help="its line (default: the name, slugged)")
     p.add_argument("--harness", choices=HARNESSES,
@@ -162,6 +183,8 @@ def main(argv: list[str] | None = None) -> None:
             code = stop(client, held, owner, a.name, line, a.harness)
         elif a.mode == "rewake":
             code = rewake(client, held, Woken(cfg["port"], a.name, line), owner, a.name, line, a.max_s)
+        elif a.mode == "push":
+            code = push(client, held, owner, a.name, line)
         elif a.mode == "held":
             event = json.loads(sys.stdin.read() or "{}")
             # Gemini's Notification hook runs for every notification; only a permission prompt holds it.

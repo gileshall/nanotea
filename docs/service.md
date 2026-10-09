@@ -38,6 +38,7 @@ Agents' long-lived processes follow on their own once the service runs the new c
   again. One that reaches the service while it restarts fails as not reachable; made again, it works.
 - `nanotea-tell --listen` ends like a batch, printing `[upgraded] ...`, so whoever runs it starts it again.
 - `nanotea hook rewake` starts itself again in place, for the time it had left. The agent isn't woken.
+- `nanotea listen` starts itself again in place. The agent isn't told.
 
 A process hands over only when the code on disk is the service's version. Between updating the code and
 restarting the service, nothing moves. If the relay can't start the new server, it says so on stderr and
@@ -210,6 +211,7 @@ and names it.
 - `[stt]`: `command` (`argv` and `timeout_s`, both required) prints a transcript of `{audio_file}`. The default runs `transcribe.sh` (shipped in the package; `{package}` is where it is) with local openai-whisper and `large-v3-turbo`, loaded per reply; name a python that has openai-whisper.
 - `[notify]`: `now` (default `[]`; `["push"]` for the web app's notifications) when a message is ready; `escalate` (`imessage` to `notify.imessage.to`, or `[]`, the default, for none) after `escalate_after_min` (30) without a response. `[notify.imessage]` takes `to`. `[notify.push]` takes `subject`, the contact push services see (`mailto:`, or `https://` with no port or path), is required when `push` is used. Without `push`, the page says notifications are off and why.
 - `[audio]`, optional: `format` of a joined track (`mp3`, the default; `aac`; `flac`; `wav`, 24-bit), `kbps` for mp3 and aac (default 192), `rate` (44100, 48000 the default, 88200, 96000), `max_upload_mb` for a file the owner attaches (default 1024). A joined track is a message's speech with its clips, or several takes sent together.
+- `[delivery]`, optional: how the owner's messages reach agents ([agents.md](agents.md#delivery-modes)). `mode` (`pull`, the default; `push`; `listen`) for every agent, and `agents`, a table of agent name = mode for particular ones. A bad key or mode stops the service and names it.
 - `[bang]`, optional, for the owner's `!command` ([agents.md](agents.md#bang-commands)); every key is a whole number: `timeout_s` (default 120, 1 to 3600) after which a command is killed, `expire_s` (60, 5 to 600) after which an unclaimed command is "not run", `output_kb` (30, 1 to 1024) per stream for the agent and the page, `keep_mb` (16, 1 to 512) per stream kept on disk under `data/bang/<id>/`. A bad value stops the service and names the key. Whether bang commands are on at all is the owner's Settings switch, off by default.
 - `plugin_path`: directories, relative to the config's, for plugins named `"module:Class"`.
 

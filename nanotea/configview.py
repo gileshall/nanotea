@@ -5,7 +5,7 @@ here: a key from env_file is only set or missing, and any secret's value is scru
 import json
 import tomllib
 
-from nanotea import audio, bang, configedit, plugins, quirks, sop, themes
+from nanotea import audio, bang, configedit, delivery, plugins, quirks, sop, themes
 from nanotea.config import APP, NOTIFY, TOP, Option
 from nanotea.prompts import MAX_CHARS, NAMES
 from nanotea.rewrite import OUTPUT_CONTRACT, SCHEMA, ClaudeRewriter, CommandRewriter, request
@@ -128,6 +128,11 @@ def build(app) -> dict:
                 "about": "Limits on the !command you type on an agent's line. Whether they are on at all is the "
                          "Bang commands switch under Settings, off by default.",
                 "rows": rows(bang.OPTIONS, given.get("bang", {}), ("bang",))})
+    out.append({"id": "delivery", "title": "Delivery", "where": where("delivery"), "plugin": None, "others": [],
+                "secrets": [], "facts": [],
+                "about": "How your messages reach each agent. Every mode keeps check and wait; push and listen also "
+                         "hand them over while the agent works. Agents hear of a change with their next tool call.",
+                "rows": rows(delivery.OPTIONS, given.get("delivery", {}), ("delivery",))})
     out.append({"id": "theme", "title": "Theme", "where": where("theme"), "plugin": None, "others": [],
                 "secrets": [], "facts": [],
                 "about": "What a new install starts with. You choose in Settings > Look, kept in data/theme.json; "
@@ -243,8 +248,8 @@ def prompts(app) -> dict:
     example = request("The build passed. Want me to deploy?", "Builder (builder)", None, True)
     settings_label = {k: label for k, label, _ in FEATURES}
     settings_label.update({f"tools.{t}": f"tool {t}" for t in OPTIONAL_TOOLS})
-    lines = [{"text": text, "added_by": "always" if f in (None, "idle") else settings_label.get(f, f),
-              "on": f is None or f == "idle" or sop.on(now, f)} for f, text in sop.lines(owner, now, "finish")]
+    lines = [{"text": text, "added_by": "always" if f in sop.ALWAYS else settings_label.get(f, f),
+              "on": f in sop.ALWAYS or sop.on(now, f)} for f, text in sop.lines(owner, now, "finish")]
     out = {
         "owner": owner,
         "rewrite": {"used": used, "custom": custom is not None, "template": p.template("rewrite"),
@@ -254,7 +259,8 @@ def prompts(app) -> dict:
         "agreement": {"text": sop.render(owner, now), "brief": sop.render(owner, now, brief=True),
                       "brief_max": sop.BRIEF_MAX, "lines": lines,
                       "brief_for": [h for h, q in quirks.QUIRKS.items() if q.instructions_max],
-                      "idle": {k: v.format(owner=owner) for k, v in sop.IDLE.items()}},
+                      "idle": {k: v.format(owner=owner) for k, v in sop.IDLE.items()},
+                      "delivery": {k: v.format(owner=owner) for k, v in sop.DELIVERY.items()}},
         "tools": [{"name": n, "description": d["description"]} for n, d in app.tool_defs.items()],
         "other": [{"what": "The on_call prompt agents can invoke", "text": on_call_text(owner, None)},
                   {"what": "What the stop and wake hooks say to an agent with messages waiting",

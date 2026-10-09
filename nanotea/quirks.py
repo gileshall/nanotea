@@ -13,12 +13,19 @@ class Quirks:
     idle: str = "finish"  # with nothing to do: "hook" where nanotea setup installs a wake hook
     wait_s: int = 50  # wait's default timeout: under the 60 s many harnesses allow a tool call
     instructions_max: int | None = None  # characters of a server's instructions the model gets; None: all of them
+    # The delivery modes it can do beyond pull ([delivery], nanotea/delivery.py). push: setup installs a hook that
+    # runs after each tool call and adds to what the model sees. listen: the agent hears when a background command
+    # it started ends.
+    push: bool = False
+    listen: bool = False
 
 
 QUIRKS: dict[str, Quirks] = {
     # idle: setup installs the rewake hook. instructions_max: live, its MCP log says "Server instructions truncated
-    # from 2960 to 2048 chars", and the model gets none of the rest.
-    "claude": Quirks(idle="hook", instructions_max=2048),
+    # from 2960 to 2048 chars", and the model gets none of the rest. push: live, a synchronous PostToolUse hook's
+    # additionalContext reaches the model before its next step. listen: live, a background Bash task's end comes to
+    # the agent as a notification, mid-turn or idle.
+    "claude": Quirks(idle="hook", instructions_max=2048, push=True, listen=True),
     "codex": Quirks(),
     "cursor": Quirks(),
     # setup gives the server a 600 s timeout (gemini mcp add --timeout 600000). From the docs.

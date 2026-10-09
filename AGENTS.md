@@ -59,6 +59,8 @@ owner's recording --drafts--> server.py --> worker.Transcriber (stt.py) --> deli
 | `server.py` | the HTTP service (stdlib `ThreadingHTTPServer`, no framework): routes, the owner's and agents' APIs, `App` |
 | `pages.py` | every page: Python strings of HTML, CSS and inline JS, including the recorder |
 | `mcp_server.py` | one MCP server per agent session, over stdio; the tools and what each returns |
+| `mailbox.py` | what is new for one agent, taken once: shared by check and wait, the push hook and `nanotea listen` |
+| `delivery.py` | `[delivery]`: each agent's mode, pull, push or listen |
 | `relay.py` | `nanotea mcp`: runs `mcp_server.py` as a child and starts it again on new code after an upgrade |
 | `version.py` | the code's version, a hash of the package; sent on every response, so long-lived clients hand over |
 | `tell.py` | `nanotea-tell`, the CLI for scripts and event sources |
@@ -84,8 +86,8 @@ owner's recording --drafts--> server.py --> worker.Transcriber (stt.py) --> deli
 | `export.py` | messages as markdown, for `/export.md` |
 | `bang.py` | the owner's `!command`: `[bang]` settings, `run`, and `Host`, the session-side loop that runs commands |
 | `sop.py` | the working agreement agents are given, and its brief form |
-| `quirks.py` | what differs between harnesses, as data: idle mode, wait, how much of the agreement each keeps |
-| `setup.py`, `hook.py` | per-harness wiring: what `nanotea setup` prints, and the hooks |
+| `quirks.py` | what differs between harnesses, as data: idle mode, wait, how much of the agreement each keeps, the delivery modes each can do |
+| `setup.py`, `hook.py`, `listen.py` | per-harness wiring: what `nanotea setup` prints, the hooks, and `nanotea listen` |
 
 Docs: [docs/agents.md](docs/agents.md) (harnesses, tools, what arrives), [docs/cli.md](docs/cli.md),
 [docs/running.md](docs/running.md) (how browsers reach it, every way, and how each was checked),

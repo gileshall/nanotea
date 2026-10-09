@@ -192,7 +192,7 @@ class SetAside(Case):
         self.assertIn("set this question aside without answering it", item["text"])
         # What MCP servers from before set_aside read of an answer.
         self.assertFalse({"text", "reaction", "audio", "files", "tap", "at", "re"} - item.keys())
-        from nanotea.mcp_server import _answer_item
+        from nanotea.mailbox import _answer_item
         self.assertEqual(_answer_item(item), {"kind": "set_aside", "from": "nanotea", "at": item["at"],
                                               "id": f"aside-{old}", "re": item["re"], "text": item["text"]})
         self.assertEqual(self.local("POST", "/api/agents/asider/answers/delivered",
