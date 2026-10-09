@@ -85,6 +85,8 @@ def wait_reply(base: str, msg_id: str) -> None:
         reply = msg["reply"]
         if reply is None and msg["line"] is not None and wrote_meanwhile(base, msg):
             return
+        if reply is None and version.stale(SERVICE["version"]):
+            again(["--from", msg["sender"], "--wait-reply", msg_id])
         if reply is None and msg["status"] == "failed":
             sys.exit(f"nanotea-tell: delivery failed: {msg['error']}")
         if reply is None and msg["set_aside"]:
@@ -253,7 +255,9 @@ def listen(base: str, sender: str, about: str | None, box: str | None, channels:
     process is the session that runs the owner's bang commands, for as long as it waits; a command's result alone
     doesn't end the wait."""
     if not bang:
-        return _listen(base, sender, about, box, channels, idle)
+        if _listen(base, sender, about, box, channels, idle):
+            again(sys.argv[1:])
+        return
     session = secrets.token_hex(8)
     client = Client(PORT, TOKEN)
 
@@ -268,7 +272,7 @@ def listen(base: str, sender: str, about: str | None, box: str | None, channels:
     host = Host(client, sender, session, register)
     host.start()
     try:
-        _listen(base, sender, about, box, channels, idle)
+        upgraded = _listen(base, sender, about, box, channels, idle)
     finally:
         host.stop()
         host.finish(None)
@@ -276,9 +280,21 @@ def listen(base: str, sender: str, about: str | None, box: str | None, channels:
             client.post(f"/api/sessions/{session}/close", {})
         except NanoteaError as err:
             print(f"nanotea-tell: closing the session failed: {err}", file=sys.stderr)
+    if upgraded:
+        again(sys.argv[1:])
 
 
-def _listen(base: str, sender: str, about: str | None, box: str | None, channels: list[str], idle: bool) -> None:
+def again(args: list[str]) -> None:
+    """The same wait, on the service's new code, in this process: whoever runs it needn't start it again."""
+    print(f"nanotea-tell: nanotea was upgraded from version {version.RUNNING} to {SERVICE['version']}; going on "
+          "waiting on the new code", file=sys.stderr)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(sys.executable, [sys.executable, "-m", "nanotea.tell", *args])
+
+
+def _listen(base: str, sender: str, about: str | None, box: str | None, channels: list[str], idle: bool) -> bool:
+    """Whether the service was upgraded: False once a batch is printed."""
     query = urllib.parse.urlencode({"name": sender})
     inbox_query = urllib.parse.urlencode({"name": sender, **({"idle": 1} if idle else {})})
     api = f"{base}/api/{inbox_segment(box)}" if box else None
@@ -314,12 +330,9 @@ def _listen(base: str, sender: str, about: str | None, box: str | None, channels
                 request(f"{ch}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener})
                 got = True
         if got:
-            return
+            return False
         if version.stale(SERVICE["version"]):
-            # Ends like a batch, so whoever runs the listener starts it again, on the new code.
-            print(f"[upgraded] nanotea was upgraded from version {version.RUNNING} to {SERVICE['version']}. Start "
-                  f"this listener again to run the new code.\n")
-            return
+            return True
         time.sleep(3)
 
 

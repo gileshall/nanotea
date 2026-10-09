@@ -274,7 +274,8 @@ No MCP feature can put a message in front of an idle model, so nanotea uses thre
    agent goes on to check it. It sends an agent back once per turn.
 3. Idle wake. In Claude Code, `nanotea hook rewake` runs in the background once the agent's turn ends and exits
    2 when the owner writes, which wakes the session. While it waits, the owner sees the agent as connected and
-   idle. It doesn't wake an agent again for the same messages within 2 minutes. With Batch events on, events
+   idle. It doesn't wake an agent again for the same messages within 2 minutes, nor for what a listener of the
+   agent's own takes within 5 seconds: that listener's ending wakes it. With Batch events on, events
    alone wait 5 seconds for others before they wake it. One waits per line: the next turn's end, or a prompt
    (`nanotea hook clear` on `UserPromptSubmit`), ends the one before.
 

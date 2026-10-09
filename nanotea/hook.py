@@ -6,8 +6,9 @@ for Cursor a followup_message.
 rewake: run in the background when the agent goes idle (Claude Code: a Stop hook with asyncRewake). Shows the
 agent as idle and listening while it waits until something of the owner's is ready, then exits 2 with a note,
 which wakes the agent. It wakes again for the same items only after REPEAT_S, so an agent that doesn't check
-isn't woken in a loop. A newer rewake for the line, or a prompt (clear on UserPromptSubmit), ends it,
-so turns don't pile up waits. With batch_events on, events alone wait EVENT_SETTLE_S for others before they wake it.
+isn't woken in a loop, nor for what a listener of its own takes within LISTENER_GRACE_S. A newer rewake for the
+line, or a prompt (clear on UserPromptSubmit), ends it, so turns don't pile up waits. With batch_events on,
+events alone wait EVENT_SETTLE_S for others before they wake it.
 A bang command's result (the owner's !command) never wakes the agent or counts as something waiting: the server
 leaves it out of the waiting total and ids. It reaches the agent with the next thing that does, or at its next check.
 held: the harness is asking for permission (Claude Code and Codex PermissionRequest, Gemini Notification), so the
@@ -41,6 +42,7 @@ from nanotea.settings import EVENT_SETTLE_S
 POLL_S = 3
 REWAKE_MAX_S = 23 * 3600
 REPEAT_S = 120
+LISTENER_GRACE_S = 5  # longer than a listener's poll: what one takes in that time needs no wake
 HARNESSES = ("claude", "codex", "gemini", "vscode", "cursor")
 
 
@@ -178,7 +180,7 @@ def rewake(client: Client, held: Held, woken: Woken, latest: Latest, owner: str,
         started = latest.next()
     batch = client.get("/api/settings")["settings"]["batch_events"]
     deadline = time.monotonic() + max_s
-    first_event = None
+    first_event = first_due = None
     while time.monotonic() < deadline:
         if latest.superseded(started):
             return 0
@@ -188,11 +190,17 @@ def rewake(client: Client, held: Held, woken: Woken, latest: Latest, owner: str,
             left = max(1, int(deadline - time.monotonic()))
             os.execv(sys.executable, [sys.executable, "-m", "nanotea", "hook", "rewake", "--name", name, "--line",
                                       line, "--max-s", str(left), "--started", str(started)])
+        if not w["total"]:
+            first_due = None
         if w["total"] and woken.due(w["ids"]):
+            # A listener the agent runs may take it first, and its ending wakes the agent with the items; woken
+            # as well, the agent's check would find nothing.
+            first_due = first_due or time.monotonic()
             only_events = w["total"] == w["events"]
             if only_events and batch:
                 first_event = first_event or time.monotonic()
-            if not (only_events and batch) or time.monotonic() - first_event >= EVENT_SETTLE_S:
+            settled = not (only_events and batch) or time.monotonic() - first_event >= EVENT_SETTLE_S
+            if settled and time.monotonic() - first_due >= LISTENER_GRACE_S:
                 woken.mark(w["ids"])
                 print(note(owner, w), file=sys.stderr)
                 return 2

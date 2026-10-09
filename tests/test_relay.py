@@ -130,6 +130,7 @@ class Relay(Case):
 
     def test_listeners_hand_over(self):
         self.token("Wes")
+        self.token("Xia")
         self.assertEqual(self.local("POST", "/api/dm-wes", {"name": "Wes", "open": True})[0], 200)
         listener = subprocess.Popen([sys.executable, "-m", "nanotea.tell", "--from", "Wes", "--listen", "--inbox",
                                      "wes"], env=self.env, cwd=self.tmp.name, stdout=subprocess.PIPE,
@@ -137,18 +138,35 @@ class Relay(Case):
         rewake = subprocess.Popen([sys.executable, "-m", "nanotea", "hook", "rewake", "--name", "Wes"],
                                   env=self.env, cwd=self.tmp.name, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True)
-        for proc in (listener, rewake):
+        ask = subprocess.Popen([sys.executable, "-m", "nanotea.tell", "--from", "Xia", "--voice", self.agent("Xia"),
+                                "--ask", "Which way?"], env=self.env_for("Xia"), cwd=self.tmp.name,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for proc in (listener, rewake, ask):
             self.addCleanup(lambda p=proc: (p.poll() is None and p.kill(), p.communicate()))
         time.sleep(4)
         self.assertIsNone(listener.poll())
+        self.assertIsNone(ask.poll())
+        asked = [m["id"] for m in json.loads(self.call("GET", "/api/messages")[1]) if m["sender"] == "Xia"]
         markdown = self.pkg / "nanotea" / "markdown.py"
         markdown.write_text(markdown.read_text() + "\n# upgraded\n")
-        new = self.restart()
+        self.restart()
 
+        # The listener and the ask go on waiting, as themselves on the new code: nobody starts them again.
+        def on_new_code(proc, args):
+            command = subprocess.run(["ps", "-o", "command=", "-p", str(proc.pid)], capture_output=True,
+                                     text=True).stdout
+            return "-m nanotea.tell " + args in command
+        self.wait_for(lambda: on_new_code(ask, f"--from Xia --wait-reply {asked[0]}"), "the ask to go on")
+        time.sleep(4)
+        self.assertIsNone(listener.poll())
+        self.assertEqual(self.call("POST", "/api/dm-wes/messages", {"text": "still there?"})[0], 200)
         out, err = listener.communicate(timeout=30)
         self.assertEqual(listener.returncode, 0, err)
-        self.assertIn("[upgraded] nanotea was upgraded from version", out)
-        self.assertIn(f"to {new}. Start this listener again", out)
+        self.assertIn("still there?", out)
+        self.assertIn("going on waiting on the new code", err)
+        self.assertEqual(self.call("POST", f"/api/messages/{asked[0]}/reply", {"text": "left"})[0], 200)
+        out, err = ask.communicate(timeout=30)
+        self.assertEqual((ask.returncode, out.splitlines()[-1]), (0, "left"), err)
 
         # The wake hook goes on waiting, as itself on the new code: same process, the time it has left.
         def again():

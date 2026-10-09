@@ -440,6 +440,15 @@ class Service(Tokens, unittest.TestCase):
         out, err = third.communicate(timeout=30)
         self.assertEqual(third.returncode, 2, err)
         self.assertIn("1 message(s) from Robin waiting", err)
+        # A listener of its own takes the next one first: its ending wakes the agent, so the hook doesn't.
+        fourth = rewake()
+        self.wait_for(lambda: self.row("Tam")[1]["listening"], "Tam's wake hook to wait")
+        self.assertEqual(self.call("POST", "/api/dm-tam/messages", {"text": "for the listener"})[0], 200)
+        r = subprocess.run([sys.executable, "-m", "nanotea.tell", "--from", "Tam", "--listen", "--inbox", "tam"],
+                           env=self.env_for("Tam"), capture_output=True, text=True, timeout=30)
+        self.assertIn("for the listener", r.stdout, r.stderr)
+        time.sleep(8)
+        self.assertIsNone(fourth.poll(), fourth.poll() is not None and fourth.communicate())
 
     def test_pages_carry_the_configured_names(self):
         status, page = self.call("GET", "/")
