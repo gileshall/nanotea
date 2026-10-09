@@ -60,7 +60,7 @@ owner's recording --drafts--> server.py --> worker.Transcriber (stt.py) --> deli
 | `pages.py` | every page: Python strings of HTML, CSS and inline JS, including the recorder |
 | `mcp_server.py` | one MCP server per agent session, over stdio; the tools and what each returns |
 | `mailbox.py` | what is new for one agent, taken once: shared by check and wait, the push hook and `nanotea listen` |
-| `delivery.py` | `[delivery]`: each agent's mode, pull, push or listen |
+| `delivery.py` | `[delivery]`: each agent's mode, poll, push or listen |
 | `relay.py` | `nanotea mcp`: runs `mcp_server.py` as a child and starts it again on new code after an upgrade |
 | `version.py` | the code's version, a hash of the package; sent on every response, so long-lived clients hand over |
 | `tell.py` | `nanotea-tell`, the CLI for scripts and event sources |

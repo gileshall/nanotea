@@ -3350,7 +3350,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(err.status, {"error": str(err)})
         except (KeyError, TypeError, ValueError, FileNotFoundError) as err:
             return self._json(400, {"error": f"{type(err).__name__}: {err}"})
-        log.info("%s inbox messages delivered to %s: %s", box, name, ", ".join(ids))
+        log.info("%s inbox messages delivered to %s (%s): %s", box, name, listener or "listener not recorded",
+                 ", ".join(ids))
         self._json(200, {"ok": True})
 
     def _owner_file(self, where: str, msg_id: str, basename: str) -> None:

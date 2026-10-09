@@ -1,4 +1,4 @@
-"""Delivery modes ([delivery]): pull, the push hook, and nanotea listen; what the service, the MCP server and setup
+"""Delivery modes ([delivery]): poll, the push hook, and nanotea listen; what the service, the MCP server and setup
 say of each."""
 
 import asyncio
@@ -25,13 +25,13 @@ SESSIONS: dict[str, str] = {}
 
 class Settings(unittest.TestCase):
     def test_the_table_is_checked(self):
-        self.assertEqual(delivery.settings({}), {"mode": "pull", "agents": {}})
+        self.assertEqual(delivery.settings({}), {"mode": "poll", "agents": {}})
         table = delivery.settings({"delivery": {"mode": "push", "agents": {"desk": "listen"}}})
         self.assertEqual((delivery.mode_for(table, "desk"), delivery.mode_for(table, "other"),
                           delivery.mode_for(table, None)), ("listen", "push", "push"))
         for bad, says in (({"delivery": []}, r"\[delivery\] must be a table"),
-                          ({"delivery": {"mood": "pull"}}, r"\[delivery\] mood: unknown; known: mode, agents"),
-                          ({"delivery": {"mode": "poll"}}, "mode must be one of pull, push, listen, not 'poll'"),
+                          ({"delivery": {"mood": "poll"}}, r"\[delivery\] mood: unknown; known: mode, agents"),
+                          ({"delivery": {"mode": "pull"}}, "mode must be one of poll, push, listen, not 'pull'"),
                           ({"delivery": {"agents": ["desk"]}}, "agents must be a table"),
                           ({"delivery": {"agents": {"desk": "shout"}}}, "'desk' has mode 'shout'")):
             with self.subTest(bad=bad), self.assertRaisesRegex(ConfigError, says):
@@ -48,7 +48,7 @@ class Settings(unittest.TestCase):
 
         for name, harness in (("Pusher", "codex"), ("Lister", "gemini")):
             with self.subTest(name=name), self.assertRaisesRegex(
-                    ValueError, rf"gives {name} mode \w+, which {harness} can't do.*agents.{name} = \"pull\""):
+                    ValueError, rf"gives {name} mode \w+, which {harness} can't do.*agents.{name} = \"poll\""):
                 server(name, ["--harness", harness])
         # claude can; with no harness named, nothing says it can't.
         self.assertIn("A hook adds Robin's messages", server("Pusher", ["--harness", "claude"]).instructions)
@@ -82,7 +82,7 @@ class Modes(Case):
     def test_waiting_says_the_mode_and_channels(self):
         self.open("Plain")
         self.open("Pusher", ["general"])
-        self.assertEqual((self.waiting("Plain")["delivery"], self.waiting("Plain")["channels"]), ("pull", []))
+        self.assertEqual((self.waiting("Plain")["delivery"], self.waiting("Plain")["channels"]), ("poll", []))
         self.assertEqual((self.waiting("Pusher")["delivery"], self.waiting("Pusher")["channels"]),
                          ("push", ["general"]))
         status, out = self.local("POST", "/api/sessions", {"name": "Plain", "session": "abcd", "pid": os.getpid(),
@@ -148,7 +148,7 @@ class Modes(Case):
         self.open("Plain")
         r = self.run_nanotea("listen", "--name", "Plain")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("Plain's delivery mode is pull, not listen", r.stderr)
+        self.assertIn("Plain's delivery mode is poll, not listen", r.stderr)
 
     def mcp(self, *args, as_):
         return StdioServerParameters(command=sys.executable, args=["-m", "nanotea", "mcp", *args],
@@ -166,7 +166,7 @@ class Modes(Case):
 
         async def session():
             async with Client(self.mcp("--harness", "claude", as_="Lister"), mode="legacy") as c:
-                self.assertIn(sop.delivery_line("Robin", "pull", brief=True), c.instructions)  # before join
+                self.assertIn(sop.delivery_line("Robin", "poll", brief=True), c.instructions)  # before join
                 out = await self.tool(c, "join", name="Lister", voice=self.agent("Lister"))
                 self.assertEqual(out["delivery"]["mode"], "listen")
                 self.assertEqual(out["delivery"]["text"], "Your delivery mode is listen: "

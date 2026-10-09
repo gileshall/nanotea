@@ -104,7 +104,7 @@ for `AGENTS.md`, and `nanotea sop --skill` as an [Agent Skill](https://agentskil
 that don't pass MCP server instructions to the model, or to keep the rules in the repository. In short:
 
 - Join once with a stable name; pick a voice the first time.
-- How the owner's messages reach the agent: its [delivery mode](#delivery-modes). In pull, the default, only
+- How the owner's messages reach the agent: its [delivery mode](#delivery-modes). In poll, the default, only
   through `check` and `wait`: check between steps of long work and before finishing.
 - Every result carries `waiting`, the count of the owner's messages ready for the agent. Above zero: check.
 - The owner sees none of the agent's terminal: anything meant for them goes through `send` or `ask`.
@@ -290,7 +290,7 @@ Two other modes hand the owner's messages over without the agent asking, where t
 
 | Mode | How messages reach the agent | Harnesses | Suits |
 |---|---|---|---|
-| `pull` (default) | `check` and `wait`; the stop and wake hooks send it back | every one | agents that work in steps and look between them; any harness |
+| `poll` (default) | `check` and `wait`; the stop and wake hooks send it back | every one | agents that work in steps and look between them; any harness |
 | `push` | after each tool call, `nanotea hook push` adds them to what the model sees next | Claude Code | long tasks the owner may need to redirect mid-way |
 | `listen` | the agent keeps `nanotea listen` running in the background; it exits with them, and the harness tells the agent | Claude Code | the same, and the way `nanotea-tell --listen` works: the harness, not the agent, notices |
 
@@ -298,7 +298,7 @@ The service's config picks the mode, for every agent and for particular ones:
 
 ```toml
 [delivery]
-mode = "pull"
+mode = "poll"
 agents = { desk = "push", builder = "listen" }
 ```
 

@@ -757,6 +757,8 @@ class Service(Tokens, unittest.TestCase):
                       f'"Uma" --wait-reply {asked[0]}]', out)
         w = json.loads(self.local("GET", "/api/agents/Uma/waiting?line=dm-uma")[1])
         self.assertEqual(w["total"], 0)  # delivered, to the ask
+        page = self.call("GET", "/chat/uma")[1]
+        self.assertRegex(page, r"Picked up by Uma .{0,80} · nanotea-tell --ask, pid \d+ of \d+, in ")
         self.assertEqual(self.call("POST", f"/api/messages/{asked[0]}/reply", {"text": "main"})[0], 200)
         r = subprocess.run([sys.executable, "-m", "nanotea.tell", "--from", "Uma", "--wait-reply", asked[0]],
                            env=self.env_for("Uma"), capture_output=True, text=True, timeout=30)

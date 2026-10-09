@@ -32,7 +32,7 @@ IDLE = {
 
 # How the owner's messages reach the agent: its mode in [delivery] (nanotea/delivery.py).
 DELIVERY = {
-    "pull": ("Messages from {owner} reach you only through the check and wait tools. Call check between steps of "
+    "poll": ("Messages from {owner} reach you only through the check and wait tools. Call check between steps of "
              "long work and before you finish a task. Every nanotea tool result carries \"waiting\": how many of "
              "{owner}'s messages are ready for you. When it is above zero, call check before you go on."),
     "push": ("Messages from {owner} reach you on their own: after your tool calls, a hook adds them to what you see, "
@@ -59,7 +59,7 @@ BRIEF_IDLE = {
 }
 
 BRIEF_DELIVERY = {
-    "pull": ("{owner}'s messages come only through check and wait. Call check between steps, before finishing, and "
+    "poll": ("{owner}'s messages come only through check and wait. Call check between steps, before finishing, and "
              "when a result's \"waiting\" is above zero."),
     "push": ("A hook adds {owner}'s messages after your tool calls (\"Nanotea push\"): act on them. Call check "
              "before finishing and when a result's \"waiting\" is above zero."),
@@ -153,7 +153,7 @@ ALWAYS = (None, "idle", "delivery")  # lines no setting adds
 
 
 def lines(owner: str, settings: dict, idle: str, brief: bool = False,
-          mode: str = "pull") -> list[tuple[str | None, str]]:
+          mode: str = "poll") -> list[tuple[str | None, str]]:
     """Every line the agreement can carry, filled in, with the setting that adds it. mode: the agent's delivery."""
     if idle not in IDLE_MODES:
         raise ValueError(f"idle must be one of {', '.join(IDLE_MODES)}, not {idle!r}")
@@ -168,7 +168,7 @@ def delivery_line(owner: str, mode: str, brief: bool = False) -> str:
 
 
 def render(owner: str, settings: dict, name: str | None = None, line: str | None = None,
-           idle: str = "finish", brief: bool = False, mode: str = "pull") -> str:
+           idle: str = "finish", brief: bool = False, mode: str = "poll") -> str:
     if name:
         identity = (BRIEF_JOINED if brief else JOINED).format(name=name, line=line)
     else:

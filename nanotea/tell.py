@@ -91,7 +91,7 @@ def wait_reply(base: str, msg_id: str) -> None:
             sys.exit(f"nanotea-tell: delivery failed: {msg['error']}")
         if reply is None and msg["set_aside"]:
             request(f"{base}/api/agents/{urllib.parse.quote(msg['sender'], safe='')}/answers/delivered",
-                    {"ids": [f"aside-{msg_id}"], "listener": f"nanotea-tell pid {os.getpid()}"}, patient=True)
+                    {"ids": [f"aside-{msg_id}"], "listener": taker("--ask")}, patient=True)
             sys.exit(f"nanotea-tell: {OWNER} set this question aside without answering it; ask again if you still "
                      "need the answer")
         if reply is not None and reply["transcript_status"] == "pending" and not noted:
@@ -115,9 +115,14 @@ def wait_reply(base: str, msg_id: str) -> None:
                 for t in reply.get("takes", []):
                     print(take_line(f"{msg['dir']}/{t['stored'] or reply['audio']}", t))
             request(f"{base}/api/agents/{urllib.parse.quote(msg['sender'], safe='')}/answers/delivered",
-                    {"ids": [msg_id], "listener": f"nanotea-tell pid {os.getpid()}"}, patient=True)
+                    {"ids": [msg_id], "listener": taker("--ask")}, patient=True)
             return
         time.sleep(3)
+
+
+def taker(how: str) -> str:
+    """Which process took the owner's messages, as the owner sees it: enough to find a stray one."""
+    return f"nanotea-tell {how}, pid {os.getpid()} of {os.getppid()}, in {Path.cwd().name[:20]}"
 
 
 def wrote_meanwhile(base: str, msg: dict) -> bool:
@@ -129,7 +134,7 @@ def wrote_meanwhile(base: str, msg: dict) -> bool:
         return False
     print_inbox(pending)
     request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending],
-                                 "listener": f"nanotea-tell pid {os.getpid()}, waiting for the answer to {msg['id']}"})
+                                 "listener": taker("--ask")})
     print(f"[{OWNER} wrote in your line while you waited. Your question {msg['id']} is still open; to wait for its "
           f"answer: nanotea-tell --from {json.dumps(sender)} --wait-reply {msg['id']}]")
     return True
@@ -311,7 +316,7 @@ def _listen(base: str, sender: str, about: str | None, box: str | None, channels
     where = f"--inbox {box}" if box else f"--channel {channels[0]}"
     print(f"nanotea-tell: show {OWNER} you're typing before a long write: nanotea-tell --from {json.dumps(sender)} "
           f"--typing {where}", file=sys.stderr)
-    listener = f"pid {os.getpid()}"
+    listener = taker("--listen")
     while True:
         got = False
         if api:

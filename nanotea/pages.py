@@ -2888,6 +2888,8 @@ def _owner_item(m: dict, cont: bool = False, replies: str = "") -> str:
                  else "Transcribing" if m["transcript_status"] == "pending" else "Not picked up yet")
     elif m["delivered_at"]:
         state = f"Picked up by {m['delivered_to']} {_stamp(m['delivered_at'])}"
+        if by := (m.get("deliveries") or [{}])[-1].get("by"):  # which process: a stray one shows itself
+            state += f" · {by}"
     elif m["transcript_status"] == "pending":
         got = False
         state = "Transcribing"
@@ -3914,7 +3916,7 @@ def prompts_page(view: dict) -> str:
     agreement = (
         '<h2 id="agreement">Working agreement</h2>'
         f'<p class="meta">What every agent is told when it joins, with {owner} filled in, as your switches are '
-        'now (Settings, Agents), for a session in pull mode that ends its turn with check. Your standing rules come '
+        'now (Settings, Agents), for a session in poll mode that ends its turn with check. Your standing rules come '
         'after it. Not editable here: change the switches, or add a rule.</p>'
         f'<pre>{e(a["text"])}</pre>'
         f'<details><summary>Every line, and what adds it</summary><table class="lines">{lines}</table>'

@@ -146,10 +146,10 @@ to = "+10000000000"  # phone number or Apple ID email
 
 # --- Delivery: how your messages reach each agent ------------------------------------------------------------------
 [delivery]
-# Every mode keeps check and wait. pull: the agent takes them with check and wait, and the stop and wake hooks send
+# Every mode keeps check and wait. poll: the agent takes them with check and wait, and the stop and wake hooks send
 # it back. push: a hook after each of its tool calls hands them over mid-task (Claude Code; nanotea setup installs
 # it). listen: the agent keeps nanotea listen running in the background, which exits with them (Claude Code).
-# mode = "pull"            # pull, push or listen
+# mode = "poll"            # poll, push or listen
 # agents = {}              # a mode for particular agents, by name: { desk = "push", builder = "listen" }
 
 # --- Your switches' starting values --------------------------------------------------------------------------------

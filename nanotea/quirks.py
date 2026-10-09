@@ -13,7 +13,7 @@ class Quirks:
     idle: str = "finish"  # with nothing to do: "hook" where nanotea setup installs a wake hook
     wait_s: int = 50  # wait's default timeout: under the 60 s many harnesses allow a tool call
     instructions_max: int | None = None  # characters of a server's instructions the model gets; None: all of them
-    # The delivery modes it can do beyond pull ([delivery], nanotea/delivery.py). push: setup installs a hook that
+    # The delivery modes it can do beyond poll ([delivery], nanotea/delivery.py). push: setup installs a hook that
     # runs after each tool call and adds to what the model sees. listen: the agent hears when a background command
     # it started ends.
     push: bool = False

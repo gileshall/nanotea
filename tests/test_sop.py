@@ -58,8 +58,8 @@ class Brief(unittest.TestCase):
                     for other in delivery.MODES:
                         line = sop.delivery_line("Robin", other, brief)
                         (self.assertIn if other == mode else self.assertNotIn)(line, text)
-        with self.assertRaisesRegex(ValueError, "mode must be one of pull, push, listen, not 'poll'"):
-            sop.render("Robin", EVERYTHING, mode="poll")
+        with self.assertRaisesRegex(ValueError, "mode must be one of poll, push, listen, not 'pull'"):
+            sop.render("Robin", EVERYTHING, mode="pull")
 
     def test_a_setting_drops_its_brief_line(self):
         for f, _, short in sop.LINES:

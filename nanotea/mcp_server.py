@@ -301,7 +301,7 @@ class Agent:
 
     def can(self, mode: str) -> bool:
         """Whether this harness can do mode; with no harness named, nothing says it can't."""
-        return mode == "pull" or self.harness is None or getattr(self.quirks, mode)
+        return mode == "poll" or self.harness is None or getattr(self.quirks, mode)
 
     def cannot(self, mode: str) -> str:
         return (f"[delivery] gives {self.name or 'agents'} mode {mode}, which {self.harness} can't do "
@@ -396,7 +396,7 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
     agent.quirks, agent.harness = preset.quirks, preset.harness
     mode = delivery.mode_for(delivery.settings(cfg) if agent.modes is None else agent.modes, agent.name)
     if not agent.can(mode):
-        raise ValueError(f"{agent.cannot(mode)}; set [delivery] agents.{preset.name or 'NAME'} = \"pull\", or a "
+        raise ValueError(f"{agent.cannot(mode)}; set [delivery] agents.{preset.name or 'NAME'} = \"poll\", or a "
                          f"mode it can do")
     agent.told = None if mode == "listen" else mode  # listen: the first result gives the command
     agent.instructions = render(owner, settings, agent.name, agent.line, preset.idle, brief=most is not None,

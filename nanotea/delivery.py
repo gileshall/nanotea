@@ -1,6 +1,6 @@
 """How the owner's messages reach each agent, from the [delivery] table.
 
-pull: the agent takes them with check and wait; the stop and wake hooks send it back when it stops or sleeps.
+poll: the agent takes them with check and wait; the stop and wake hooks send it back when it stops or sleeps.
 push: a hook after each of the agent's tool calls takes them and adds them to its context (nanotea hook push), so
 they reach it mid-task without it calling anything. The harness must run that hook (quirks.py).
 listen: the agent keeps nanotea listen running in the background. It exits with them, and the harness tells the
@@ -9,12 +9,12 @@ In every mode check and wait still work, and each item is delivered once, by whi
 
 from nanotea.config import ConfigError, Option
 
-MODES = ("pull", "push", "listen")
+MODES = ("poll", "push", "listen")
 OPTIONS = (
-    Option("mode", str, "How agents get your messages: pull, the agent calls check and wait; push, a hook after "
+    Option("mode", str, "How agents get your messages: poll, the agent calls check and wait; push, a hook after "
                         "each of its tool calls hands them over mid-task; listen, a background process the agent "
                         "keeps running exits with them. Push and listen need a harness that can (nanotea setup "
-                        "installs the hook).", "pull", choices=MODES),
+                        "installs the hook).", "poll", choices=MODES),
     Option("agents", dict, "A mode for particular agents, by name, in place of mode: { desk = \"push\" }.", {}),
 )
 
@@ -28,7 +28,7 @@ def settings(cfg: dict) -> dict:
     for key in table:
         if key not in known:
             raise ConfigError(f"[delivery] {key}: unknown; known: {', '.join(known)}")
-    mode = table.get("mode", "pull")
+    mode = table.get("mode", "poll")
     if mode not in MODES:
         raise ConfigError(f"[delivery] mode must be one of {', '.join(MODES)}, not {mode!r}")
     agents = table.get("agents", {})
