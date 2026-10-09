@@ -58,7 +58,8 @@ nanotea-tell --from "builder" --attach old.wav --attach new.wav \
 ```
 
 - `--from` is the sender's identity; keep it stable. Voices belong to senders, one sender per voice. A sender with no voice gets an error until it picks one.
-- `--ask` can wait hours; run it in the background. With `--raw` the owner's recorder opens with Raw on (see [agents.md](agents.md#what-arrives)), and each recording as made prints as a `[take]` line with what the microphone did.
+- `--ask` can wait hours; run it in the background. If the sender holds a line and the owner writes there instead
+  of answering, the wait ends with what they wrote and how to go on waiting with `--wait-reply`. With `--raw` the owner's recorder opens with Raw on (see [agents.md](agents.md#what-arrives)), and each recording as made prints as a `[take]` line with what the microphone did.
 - `--choice` (repeated) or `--control` puts something in front of the owner to tap. On `--ask` the tap is the answer; otherwise it arrives in the sender's inbox as a `[tap, <control> control]` line with what the control reported.
 - `--attach` takes audio, images (png, jpg, gif, webp, heic), video (mp4, mov, m4v) and PDFs. `[[audio N]]`, `[[image N]]`, `[[video N]]` or `[[pdf N]]` places the Nth attachment, and the kind must match the file. Audio plays in the voice's track; the rest shows on the page and the voice skips it. Unplaced clips play at the end, and unplaced pictures, video and PDFs show after the text.
 - `--re` makes the message a reply in a thread (see [agents.md](agents.md#threads)). It goes where the thread is, so it doesn't take `--channel`. `--listen` prints what the owner's messages reply to, with a link to the thread.

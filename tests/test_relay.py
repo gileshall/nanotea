@@ -154,7 +154,7 @@ class Relay(Case):
         def again():
             command = subprocess.run(["ps", "-o", "command=", "-p", str(rewake.pid)], capture_output=True,
                                      text=True).stdout
-            return "--max-s" in command
+            return "--max-s" in command and "--started" in command  # it keeps its place among the waits
         self.wait_for(again, "the wake hook to start again on the new code")
         self.assertIsNone(rewake.poll())
         self.assertEqual(self.call("POST", "/api/dm-wes/messages", {"text": "wake up"})[0], 200)

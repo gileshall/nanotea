@@ -77,10 +77,14 @@ def tap_line(tap: dict) -> str:
 
 
 def wait_reply(base: str, msg_id: str) -> None:
+    """Until the answer comes, or the owner writes in the asker's line: that ends the wait too, with the question
+    still open, so a message typed rather than sent as the answer isn't left for nobody."""
     noted = False
     while True:
         msg = request(f"{base}/api/messages/{msg_id}", patient=True)
         reply = msg["reply"]
+        if reply is None and msg["line"] is not None and wrote_meanwhile(base, msg):
+            return
         if reply is None and msg["status"] == "failed":
             sys.exit(f"nanotea-tell: delivery failed: {msg['error']}")
         if reply is None and msg["set_aside"]:
@@ -112,6 +116,21 @@ def wait_reply(base: str, msg_id: str) -> None:
                     {"ids": [msg_id], "listener": f"nanotea-tell pid {os.getpid()}"}, patient=True)
             return
         time.sleep(3)
+
+
+def wrote_meanwhile(base: str, msg: dict) -> bool:
+    """Takes and prints what the owner wrote in the line of msg's sender, if anything."""
+    sender = msg["sender"]
+    api = f"{base}/api/{inbox_segment(msg['line'])}"
+    pending = request(f"{api}/pending?{urllib.parse.urlencode({'name': sender})}", patient=True)
+    if not pending or all(m.get("bang") for m in pending):
+        return False
+    print_inbox(pending)
+    request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending],
+                                 "listener": f"nanotea-tell pid {os.getpid()}, waiting for the answer to {msg['id']}"})
+    print(f"[{OWNER} wrote in your line while you waited. Your question {msg['id']} is still open; to wait for its "
+          f"answer: nanotea-tell --from {json.dumps(sender)} --wait-reply {msg['id']}]")
+    return True
 
 
 INBOX_SEGMENT = {"main": "inbox"}

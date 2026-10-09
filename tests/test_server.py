@@ -53,7 +53,7 @@ backend = "command"
 [tts.command]
 argv = ["{py}", "{root}/tests/fake_tts.py", "{{text_file}}", "{{out}}"]
 ext = "m4a"
-voices = ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
+voices = ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8"]
 timeout_s = 60
 
 [stt]
@@ -310,7 +310,7 @@ class Service(Tokens, unittest.TestCase):
         self.assertIn("phone:\n  (none installed)", listed.stdout)
         checked = run("--check")
         self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
-        self.assertIn("ok      tts command: 7 voices, .m4a\n", checked.stdout)
+        self.assertIn("ok      tts command: 8 voices, .m4a\n", checked.stdout)
         self.assertIn("ok      stt command\n", checked.stdout)
         self.assertIn("ok      rewrite identity\n", checked.stdout)
         fresh = Path(self.tmp.name, "fresh.toml")
@@ -411,6 +411,35 @@ class Service(Tokens, unittest.TestCase):
         for path in ("/api/dm-erin/pending?name=Erin", "/api/agents/Erin/waiting?line=dm-erin",
                      "/api/agents/Erin/answers"):
             self.assertEqual(self.call("GET", path)[0], 403, path)
+
+    def test_a_newer_rewake_or_a_prompt_ends_the_wait(self):
+        self.assertEqual(self.local("POST", "/api/dm-tam", {"name": "Tam", "open": True})[0], 200)
+
+        def rewake():
+            proc = subprocess.Popen([sys.executable, "-m", "nanotea", "hook", "rewake", "--name", "Tam", "--max-s",
+                                     "60"], cwd=self.tmp.name, env=self.env, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.communicate()))
+            return proc
+
+        first = rewake()
+        self.wait_for(lambda: self.row("Tam")[1]["listening"], "Tam's wake hook to wait")
+        second = rewake()  # the next turn ended: one wait per line, the newest
+        self.assertEqual(first.wait(timeout=30), 0, first.communicate()[1])
+        self.assertIsNone(second.poll())
+        r = self.hook("clear", "--name", "Tam", stdin=json.dumps({"hook_event_name": "PostToolUse"}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        time.sleep(4)
+        self.assertIsNone(second.poll())  # a tool call isn't a prompt; a subagent's may come while it is idle
+        r = self.hook("clear", "--name", "Tam", stdin=json.dumps({"hook_event_name": "UserPromptSubmit"}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(second.wait(timeout=30), 0, second.communicate()[1])
+        third = rewake()
+        self.wait_for(lambda: self.row("Tam")[1]["listening"], "Tam's wake hook to wait")
+        self.assertEqual(self.call("POST", "/api/dm-tam/messages", {"text": "wake up"})[0], 200)
+        out, err = third.communicate(timeout=30)
+        self.assertEqual(third.returncode, 2, err)
+        self.assertIn("1 message(s) from Robin waiting", err)
 
     def test_pages_carry_the_configured_names(self):
         status, page = self.call("GET", "/")
@@ -698,6 +727,31 @@ class Service(Tokens, unittest.TestCase):
             proc.kill()
         self.assertEqual(out.strip().splitlines()[-1], "yes")
         self.assertIsNotNone(json.loads(self.local("GET", f"/api/messages/{msg_id}")[1])["answer_delivered"])
+
+    def test_a_waiting_ask_takes_what_the_owner_writes_in_its_line(self):
+        self.assertEqual(self.local("POST", "/api/dm-uma", {"name": "Uma", "open": True})[0], 200)
+        proc = subprocess.Popen([sys.executable, "-m", "nanotea.tell", "--from", "Uma", "--voice", "v8", "--ask",
+                                 "Which branch?"], env=self.env_for("Uma"), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.communicate()))
+        asked = []
+        self.wait_for(lambda: proc.poll() is not None or asked.extend(
+            m["id"] for m in json.loads(self.call("GET", "/api/messages")[1])
+            if m["sender"] == "Uma" and m.get("ask")) or asked, "Uma's question")
+        time.sleep(4)
+        self.assertIsNone(proc.poll(), proc.poll() is not None and proc.communicate())
+        self.assertEqual(self.call("POST", "/api/dm-uma/messages", {"text": "main, and stop asking"})[0], 200)
+        out, err = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertIn("main, and stop asking", out)
+        self.assertIn(f"Your question {asked[0]} is still open; to wait for its answer: nanotea-tell --from "
+                      f'"Uma" --wait-reply {asked[0]}]', out)
+        w = json.loads(self.local("GET", "/api/agents/Uma/waiting?line=dm-uma")[1])
+        self.assertEqual(w["total"], 0)  # delivered, to the ask
+        self.assertEqual(self.call("POST", f"/api/messages/{asked[0]}/reply", {"text": "main"})[0], 200)
+        r = subprocess.run([sys.executable, "-m", "nanotea.tell", "--from", "Uma", "--wait-reply", asked[0]],
+                           env=self.env_for("Uma"), capture_output=True, text=True, timeout=30)
+        self.assertEqual((r.returncode, r.stdout), (0, "main\n"), r.stderr)
 
     def test_direct_line_and_channel(self):
         listener = subprocess.Popen([sys.executable, "-m", "nanotea.tell", "--from", "alice",

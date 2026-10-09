@@ -6,7 +6,8 @@ for Cursor a followup_message.
 rewake: run in the background when the agent goes idle (Claude Code: a Stop hook with asyncRewake). Shows the
 agent as idle and listening while it waits until something of the owner's is ready, then exits 2 with a note,
 which wakes the agent. It wakes again for the same items only after REPEAT_S, so an agent that doesn't check
-isn't woken in a loop. With batch_events on, events alone wait EVENT_SETTLE_S for others before they wake it.
+isn't woken in a loop. A newer rewake for the line, or a prompt (clear on UserPromptSubmit), ends it,
+so turns don't pile up waits. With batch_events on, events alone wait EVENT_SETTLE_S for others before they wake it.
 A bang command's result (the owner's !command) never wakes the agent or counts as something waiting: the server
 leaves it out of the waiting total and ids. It reaches the agent with the next thing that does, or at its next check.
 held: the harness is asking for permission (Claude Code and Codex PermissionRequest, Gemini Notification), so the
@@ -136,19 +137,57 @@ class Woken:
         self.path.write_text(json.dumps({"ids": ids, "at": time.time()}))
 
 
-def rewake(client: Client, held: Held, woken: Woken, owner: str, name: str, line: str, max_s: int) -> int:
-    sys.stdin.read()
-    held.clear(client, name, always=True)  # the turn ended, so no prompt holds it
+class Latest:
+    """The newest wait for a line: a rewake starts at every turn's end, and the one before it, or one a prompt
+    ended, gives way, so at most one per line waits."""
+
+    def __init__(self, port: int, name: str, line: str):
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower())
+        self.path = Path(tempfile.gettempdir()) / f"nanotea-rewake-{port}-{slug}-{line}.latest"
+
+    def read(self) -> int | None:
+        try:
+            return int(self.path.read_text())
+        except FileNotFoundError:
+            return None
+
+    def write(self, started: int) -> None:
+        tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}")
+        tmp.write_text(str(started))
+        os.replace(tmp, self.path)
+
+    def next(self) -> int:
+        """Now, in ns, and after anything already written, so a clock stepped back can't lose a turn."""
+        return max(time.time_ns(), (self.read() or 0) + 1)
+
+    def superseded(self, started: int) -> bool:
+        """Whether a newer wait, or a prompt, came after started; claims the line if nothing newer holds it."""
+        latest = self.read()
+        if latest is not None and latest > started:
+            return True
+        if latest != started:
+            self.write(started)
+        return False
+
+
+def rewake(client: Client, held: Held, woken: Woken, latest: Latest, owner: str, name: str, line: str, max_s: int,
+           started: int | None) -> int:
+    if started is None:  # a re-exec after an upgrade keeps its place
+        sys.stdin.read()
+        held.clear(client, name, always=True)  # the turn ended, so no prompt holds it
+        started = latest.next()
     batch = client.get("/api/settings")["settings"]["batch_events"]
     deadline = time.monotonic() + max_s
     first_event = None
     while time.monotonic() < deadline:
+        if latest.superseded(started):
+            return 0
         w = waiting(client, name, line, idle=True)
         if version.stale(client.version):
             # The same wait, on the new code: the harness still holds this process, and the agent stays asleep.
             left = max(1, int(deadline - time.monotonic()))
             os.execv(sys.executable, [sys.executable, "-m", "nanotea", "hook", "rewake", "--name", name, "--line",
-                                      line, "--max-s", str(left)])
+                                      line, "--max-s", str(left), "--started", str(started)])
         if w["total"] and woken.due(w["ids"]):
             only_events = w["total"] == w["events"]
             if only_events and batch:
@@ -172,6 +211,8 @@ def main(argv: list[str] | None = None) -> None:
                         "with the note on stderr")
     p.add_argument("--max-s", type=int, default=REWAKE_MAX_S,
                    help="rewake: give up quietly after this many seconds; keep it under the hook's own timeout")
+    p.add_argument("--started", type=int,
+                   help="rewake: when this wait began, in ns since the epoch; set when it runs again on new code")
     a = p.parse_args(argv)
     cfg = load_config()
     owner = cfg["app"]["owner"]
@@ -182,7 +223,8 @@ def main(argv: list[str] | None = None) -> None:
         if a.mode == "stop":
             code = stop(client, held, owner, a.name, line, a.harness)
         elif a.mode == "rewake":
-            code = rewake(client, held, Woken(cfg["port"], a.name, line), owner, a.name, line, a.max_s)
+            code = rewake(client, held, Woken(cfg["port"], a.name, line), Latest(cfg["port"], a.name, line), owner,
+                          a.name, line, a.max_s, a.started)
         elif a.mode == "push":
             code = push(client, held, owner, a.name, line)
         elif a.mode == "held":
@@ -192,7 +234,10 @@ def main(argv: list[str] | None = None) -> None:
                 held.held(client, a.name, asking(event))
             code = 0
         else:
-            sys.stdin.read()
+            event = json.loads(sys.stdin.read() or "{}")
+            if event.get("hook_event_name") == "UserPromptSubmit":  # prompted, so not idle: end the wait
+                latest = Latest(cfg["port"], a.name, line)
+                latest.write(latest.next())
             held.clear(client, a.name)
             code = 0
     except (NanoteaError, ValueError) as err:

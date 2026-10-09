@@ -1797,7 +1797,9 @@ class Handler(BaseHTTPRequestHandler):
                 store.mark_seen(i)
             return self._html(html)
         if i := self._msg(rf"/api/messages/({M})", path):
-            return self._json(200, store.as_json(store.load(i)))
+            msg = store.load(i)
+            # line: the one its sender holds, where the owner writes to it while it waits for the answer
+            return self._json(200, {**store.as_json(msg), "line": app.box_of(msg.sender)})
         if m := re.fullmatch(rf"/api/messages/({M})", path):
             return self._json(404, {"error": f"message {m[1]} no longer exists; the owner may have deleted it"})
         if i := self._msg(rf"/audio/({M})", path):
