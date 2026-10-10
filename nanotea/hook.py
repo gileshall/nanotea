@@ -225,7 +225,8 @@ def main(argv: list[str] | None = None) -> None:
     cfg = load_config()
     owner = cfg["app"]["owner"]
     try:
-        client = Client(cfg["port"], agent_token(a.name))
+        # A rewake waits out a restart: exiting, it would leave an idle agent with nothing to wake it.
+        client = Client(cfg["port"], agent_token(a.name), outlast=a.mode == "rewake")
         line = a.line or line_for(a.name)
         held = Held(cfg["port"], a.name)
         if a.mode == "stop":

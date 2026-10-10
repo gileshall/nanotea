@@ -667,7 +667,7 @@ def _send(agent: Agent, text: str, title: str | None, channel: str | None, attac
     if re_ is not None:
         body["re"] = re_
     out = agent.client.post("/api/messages", body)
-    return {"id": out["id"], "url": out["url"]}
+    return {"id": out["id"], "url": out["url"], **({"note": out["note"]} if "note" in out else {})}
 
 
 def options(argv: list[str] | None) -> argparse.Namespace:

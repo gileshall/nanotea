@@ -1408,7 +1408,24 @@ class App:
         return out
 
     def listening(self, box: str) -> bool:
-        return time.monotonic() - self.last_listen[box] < LISTENING_WINDOW_S
+        """A poll within LISTENING_WINDOW_S, and not one that took items for a listener that then exited."""
+        if time.monotonic() - self.last_listen[box] >= LISTENING_WINDOW_S:
+            return False
+        holder = self.boxes[box].info()["holder"]
+        handed = self.handed.get(_plain(holder)) if holder else None
+        return handed is None or self.last_listen[box] > handed[0]
+
+    def voice_note(self, sender: str, voice: str) -> str | None:
+        """What the sender should know if its voice can't be played: after the voice engine changes, an agent keeps
+        the voice it had, and nothing else tells it until the owner taps play."""
+        try:
+            known = {v["id"] for v in self.tts.voices()}
+        except RuntimeError as err:
+            return f"couldn't check your voice {voice!r} with the voice engine: {err}"
+        if voice in known:
+            return None
+        return (f"your voice {voice!r} is not one the voice engine has, so {self.cfg['app']['owner']} can't play "
+                "this. Pick a free one: nanotea-tell --voices, then send with --voice ID")
 
     def handed_over(self, agent: str) -> None:
         """A listener that exits once it has printed (nanotea-tell, nanotea listen) took items for agent: until
@@ -1898,13 +1915,13 @@ class Handler(BaseHTTPRequestHandler):
         if i := self._msg(rf"/audio/({M})", path):
             name = store.load(i).audio
             if is_owner:
-                store.mark_seen(i)
                 # Voiced on request, the owner's reading settings as they are now: the owner tapped the speaker.
                 try:
                     name = app.worker.speak(i)
                 except (ValueError, RuntimeError) as err:
                     log.exception("voicing %s on request failed", i)
-                    return self._json(502, {"error": f"couldn't voice it: {err}"})
+                    return self._json(502, {"error": f"couldn't voice it: {err}"})  # unread: it wasn't heard
+                store.mark_seen(i)
             return self._file(store.path(i, name) if name else None)
         if i := self._msg(rf"/audio/({M})/reply", path):
             reply = store.reply(i)
@@ -2547,7 +2564,8 @@ class Handler(BaseHTTPRequestHandler):
             self.app.typing_done(box, msg.sender)
         self.app.worker.submit(msg.id)
         log.info("queued %s from %s%s", msg.id, msg.sender, f" in #{channel}" if channel else "")
-        self._json(202, {"id": msg.id, "url": f"{self.app.public_url}/m/{msg.id}"})
+        note = self.app.voice_note(msg.sender, voice)
+        self._json(202, {"id": msg.id, "url": f"{self.app.public_url}/m/{msg.id}", **({"note": note} if note else {})})
 
     def _check_control(self, spec) -> dict | None:
         """An agent's control spec, {"type": <control>, ...}, as its plugin checks it; None for none."""

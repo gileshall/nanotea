@@ -532,9 +532,22 @@ class Service(Tokens, unittest.TestCase):
             self.assertEqual(status, 502, out)
             self.assertIn("builder's voice 'Karen' is not one the voice engine has", json.loads(out)["error"])
             self.assertEqual(len(list(Path(after["dir"]).glob("voiced-*"))), 1)
+            # Its next send goes through, and says why it can't be played.
+            r = subprocess.run([sys.executable, "-m", "nanotea.tell", "--from", "builder", "still here"], env=self.env,
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("your voice 'Karen' is not one the voice engine has", r.stderr)
+            unplayed = re.search(r"/m/([^/?#\s]+)", r.stdout)[1]
+            self.wait_for(lambda: json.loads(self.local("GET", f"/api/messages/{unplayed}")[1])["status"] == "done",
+                          "the message")
+            self.assertEqual(self.call("GET", f"/audio/{unplayed}")[0], 502)
+            self.assertIsNone(json.loads(self.local("GET", f"/api/messages/{unplayed}")[1])["seen"])  # not heard
             book.write_text(json.dumps({**json.loads(kept), "builder": free}))
             self.assertEqual(self.call("POST", f"/api/messages/{msg_id}/revoice", {})[0], 200)
             self.assertEqual(json.loads(self.local("GET", f"/api/messages/{msg_id}")[1])["voice"], free)
+            r = subprocess.run([sys.executable, "-m", "nanotea.tell", "--from", "builder", "heard"], env=self.env,
+                               capture_output=True, text=True, timeout=60)
+            self.assertNotIn("voice engine", r.stderr)
         finally:
             book.write_text(kept)
 
@@ -871,7 +884,8 @@ class Service(Tokens, unittest.TestCase):
         finally:
             self.stop(listener)
         self.assertIn("while you work", out)
-        self.wait_for(lambda: not self.row("Ola")[1]["listening"], "the listening window to pass")
+        # Its poll was moments ago, but the listener exited with what it took: nothing listens now.
+        self.assertFalse(self.row("Ola")[1]["listening"])
         # Busy while it works on what it was handed: not away, which only RELISTEN_GRACE_S without a listener is.
         row = self.row("Ola")[1]
         self.assertEqual((row["busy"], row["away"], row["connected"]), (True, None, True))

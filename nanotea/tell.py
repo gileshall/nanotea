@@ -45,7 +45,12 @@ def request(url: str, body: dict | None = None, patient: bool = False, outlast: 
                 print("nanotea-tell: service back", file=sys.stderr, flush=True)
             return out
         except urllib.error.HTTPError as e:
-            sys.exit(f"nanotea-tell: {json.loads(e.read()).get('error', e.reason)}")
+            raw = e.read().decode(errors="replace")
+            try:
+                said = json.loads(raw).get("error", e.reason)
+            except ValueError:  # not the service's JSON: a proxy's page, say
+                said = f"HTTP {e.code} {e.reason}: {raw[:300]}"
+            sys.exit(f"nanotea-tell: {said}")
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             reason = getattr(e, "reason", e)
             if not (patient or outlast):
@@ -417,7 +422,8 @@ def board(base: str, stale: int | None) -> None:
                                    ("busy", r.get("busy")), ("typing", r["typing"])) if on]
             if r.get("away"):  # its listener exited after handing it messages; none has started since
                 why.append(f"busy, not listening since {ago(r['away'])}")
-            return "connected: " + (", ".join(why) or f"listened {ago(r['listened'])}")
+            return "connected: " + (", ".join(why) or (f"listened {ago(r['listened'])}" if r["listened"]
+                                                       else "session open, hasn't checked yet"))
         return f"not connected, last seen {ago(r['seen'])}" if r["seen"] else "not connected, never seen"
 
     def beacon(b: dict | None) -> str:
@@ -698,6 +704,8 @@ def main() -> None:
                                            **({"re": a.re} if a.re else {}),
                                            **({"channel": a.channel[0]} if a.channel else {})})
     print(out["url"])
+    if out.get("note"):
+        print(f"nanotea-tell: {out['note']}", file=sys.stderr)
     if a.ask:
         print(f"nanotea-tell: waiting for {OWNER}'s reply (resume with --wait-reply {out['id']})", file=sys.stderr)
         wait_reply(base, out["id"])
