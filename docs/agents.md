@@ -344,6 +344,7 @@ service follow it at once.
 | `held` | on | Agents held at a permission prompt are shown. |
 | `bang` | off | The owner's `!command` on an agent's direct line runs in that agent's session, if the session was started with `--bang`. Turned on with `nanotea bang on` on the service's machine; off from anywhere. Costs about 60 tokens of agreement a session, and up to about 15,000 tokens for a command whose output fills the cap. See [bang commands](#bang-commands). |
 | `held_push_min` | 0 | Notify the owner after an agent is held this many minutes; 0 never. |
+| `unheard_push_min` | 10 | Notify the owner once a message of theirs has waited this many minutes on a line whose agent isn't listening, busy with what it was handed, or held; once per stall, 0 never. |
 | `agent_messages` | `off` | `off`: no `tell`. `shown`: agents write to each other and the owner reads it under Agent talk. `hidden`: they write to each other unseen. |
 | `tools` | all on | `react`, `status`, `typing`, `channels`, `board`, `history`, `controls`, `thread`, each on or off. |
 | `thread_view` | `linear` | How the owner's conversation and channel pages draw replies: `linear` keeps time order, each reply quoting what it answers; `grouped` folds replies under their thread's first message. Agents see no difference. |

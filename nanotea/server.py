@@ -374,6 +374,7 @@ class App:
         self.dm_lock = threading.Lock()
         self.claim_lock = threading.Lock()  # one line per agent, across lines
         self.voices = VoiceBook(self.store.root / "voices.json")
+        self.unheard_path = self.store.root / "unheard.json"  # per line, the message the owner was told waits
         self.status = StatusBook(self.store.root)
         self.listened = ListenBook(self.store.root)
         self.board = Board(self.store.root, cfg["app"]["groups"])
@@ -797,6 +798,50 @@ class App:
                                           type(n).__name__)
             except Exception:
                 log.exception("checking held agents failed")
+
+    def watch_unheard(self) -> None:
+        while True:
+            time.sleep(HELD_CHECK_S)
+            try:
+                for note in self.check_unheard(datetime.now().astimezone()):
+                    for n in self.notify_now:
+                        try:
+                            n.send(note)
+                        except Exception:
+                            log.exception("notifying the owner of an unheard message via %s failed", type(n).__name__)
+            except Exception:
+                log.exception("checking for unheard messages failed")
+
+    def check_unheard(self, now: datetime) -> list[Note]:
+        """Notes for lines where the owner's oldest waiting message has waited unheard_push_min and nothing is
+        listening for it, working on its last hand-over, or held (which notifies on its own). One a stall: the
+        message told of is kept in data/unheard.json, so a restart doesn't tell again."""
+        after = self.settings.get()["unheard_push_min"]
+        if not after:
+            return []
+        told = json.loads(self.unheard_path.read_text()) if self.unheard_path.exists() else {}
+        notes = []
+        for box, inbox in list(self.boxes.items()):
+            words = [m for m in inbox.pending() if not m.get("event") and not m.get("bang")]
+            if not words or told.get(box) == words[0]["id"]:
+                continue
+            if (now - datetime.fromisoformat(words[0]["at"])).total_seconds() < after * 60:
+                continue
+            state, why = self.presence(box)
+            if state in ("listening", "busy", "held"):
+                continue
+            holder = inbox.info()["holder"]
+            told[box] = words[0]["id"]
+            path = CHAT_PATH[box]
+            notes.append(Note(title=f"{pages.who(holder) if holder else 'Nobody'} hasn't picked up your message",
+                              text=f"{len(words)} waiting since {pages.clock(words[0]['at'])}: {why}.", path=path,
+                              link=f"{self.public_url}{path}?k={self.key}", tag=f"unheard-{box}",
+                              unseen=self.unseen_count()))
+        if notes:
+            tmp = self.unheard_path.with_name(".unheard.json.tmp")
+            tmp.write_text(json.dumps(told, indent=2))
+            os.replace(tmp, self.unheard_path)
+        return notes
 
     def watch_quiet(self) -> None:
         """After quiet hours, one notification for what was held, if any of it still needs the owner."""
@@ -3660,6 +3705,7 @@ def serve() -> None:
         sys.exit(f"nanotea: {err}")
     app.resume()
     threading.Thread(target=app.watch_held, name="held", daemon=True).start()
+    threading.Thread(target=app.watch_unheard, name="unheard", daemon=True).start()
     threading.Thread(target=app.watch_quiet, name="quiet", daemon=True).start()
     threading.Thread(target=app.watch_bang, name="bang", daemon=True).start()
     server = Server((cfg["host"], cfg["port"]), app)

@@ -166,6 +166,7 @@ to = "+10000000000"  # phone number or Apple ID email
 # one_session = true         # a second live session under one name is refused
 # held = true                # show an agent stuck at a permission prompt
 # held_push_min = 0          # notify after this many minutes held; 0 never (0 to 1440)
+# unheard_push_min = 10      # notify once a message waits this long with nothing listening; 0 never (0 to 1440)
 # agent_messages = "off"     # off, shown, or hidden
 # bang = false               # the !command on an agent's line
 # thread_view = "linear"     # replies: linear (in time order) or grouped (under their thread)
