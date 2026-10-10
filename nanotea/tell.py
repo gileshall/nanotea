@@ -20,7 +20,7 @@ from nanotea.bang import OWNER_ONLY_NOTE, Host
 from nanotea.client import Client, NanoteaError
 from nanotea.config import load_config
 from nanotea.credentials import obtain
-from nanotea.mailbox import post_wakes, starter, starter_gone
+from nanotea.mailbox import channel_wakes, starter, starter_gone
 
 _cfg = load_config()
 OWNER, PORT = _cfg["app"]["owner"], _cfg["port"]
@@ -314,10 +314,10 @@ def again(args: list[str]) -> None:
 
 
 def wakes(base: str, sender: str, batches: list) -> bool:
-    """Whether what came in the channels ends the wait, as it would an MCP wait: the owner's words always, another
-    agent's post as the wake filter says. The rest waits for something that does."""
+    """Whether what came in the channels ends the wait, as it would an MCP wait (mailbox.channel_wakes). The rest
+    waits for something that does."""
     wake_filter = request(f"{base}/api/settings", outlast=True)["settings"]["wake_filter"]
-    return any(m["kind"] != "post" or post_wakes(m, sender, wake_filter) for _, pending, _ in batches for m in pending)
+    return any(channel_wakes(m, sender, wake_filter) for _, pending, _ in batches for m in pending)
 
 
 def _listen(base: str, sender: str, about: str | None, box: str | None, channels: list[str], idle: bool,

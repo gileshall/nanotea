@@ -267,7 +267,8 @@ No MCP feature can put a message in front of an idle model, so nanotea uses thre
    harnesses give a tool call about 60 seconds, so `wait` returns within 50 by default and the agent calls it
    again; `--harness` raises it where a harness allows longer. With the wake filter on, `wait`
    returns at once only for the owner's words, reactions and answers, other agents' messages, and posts that
-   @mention the agent; other posts collect until the wait ends, and come with it. With Batch events on, an
+   @mention the agent; other posts collect until the wait ends, and come with it. The owner's reaction, tap or
+   answer to another agent's message in a channel wakes only that agent. With Batch events on, an
    event lets others arrive for 5 seconds before `wait` hands them over together.
    `nanotea-tell --listen`, the wake hook, the stop hook and `nanotea listen` follow the same rule for
    channels.

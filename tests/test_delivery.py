@@ -98,17 +98,24 @@ class Modes(Case):
     def test_channel_items_count_as_they_would_end_a_wait(self):
         self.open("Heeder", ["general"])
         self.local("GET", "/api/channels/general/pending?name=Heeder")  # its cursor starts here
-        self.send("poster", "routine chatter", channel="general")
+        chatter = self.send("poster", "routine chatter", channel="general")
         w = self.waiting("Heeder")
         self.assertEqual((w["channels_waiting"], w["total"]), (0, 0))
+        status, out = self.call("POST", f"/api/messages/{chatter}/react", {"emoji": "👍"})
+        self.assertEqual(status, 200, out)
+        self.wait_for(lambda: len(self.app_pending("Heeder")) == 2, "the reaction to reach the channel")
+        self.assertEqual(self.waiting("Heeder")["channels_waiting"], 0)  # a reaction to poster is for poster
         mention = self.send("poster", "@heeder can you look?", channel="general")
         w = self.waiting("Heeder")
         self.assertEqual((w["channels_waiting"], w["total"], w["ids"]), (1, 1, [mention]))
         try:
             self.assertEqual(self.call("POST", "/api/settings", {"wake_filter": False})[0], 200)
-            self.assertEqual(self.waiting("Heeder")["channels_waiting"], 2)
+            self.assertEqual(self.waiting("Heeder")["channels_waiting"], 2)  # still not the reaction
         finally:
             self.assertEqual(self.call("POST", "/api/settings", {"wake_filter": True})[0], 200)
+
+    def app_pending(self, name):
+        return json.loads(self.local("GET", f"/api/channels/general/pending?name={name}", as_=name)[1])
 
     def test_tell_listen_wakes_for_a_mention_not_chatter(self):
         self.local("GET", "/api/channels/general/pending?name=Teller")  # its cursor starts here

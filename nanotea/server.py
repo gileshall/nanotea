@@ -43,7 +43,7 @@ from nanotea.config import CONFIG, Config, ConfigError, load_config, load_env_fi
 from nanotea.hush import HushBook, HushError
 from nanotea.index import parse_cursor, thread_key, thread_of_owner
 from nanotea.inbox import Inbox, InboxError, excerpt
-from nanotea.mailbox import post_wakes
+from nanotea.mailbox import channel_wakes
 from nanotea.mcp_server import tool_definitions
 from nanotea.notify import Note
 from nanotea.pages import API_SEGMENT, BOX_LABEL, CHAT_PATH, DM_NAME
@@ -3492,10 +3492,10 @@ class Handler(BaseHTTPRequestHandler):
         rules = self.app.rules.for_agent(agent)
         channels = self.app.channels_of(agent)
         wake_filter = self.app.settings.get()["wake_filter"]
-        # As the MCP wait: the owner's words in a channel wake it; another agent's post only as post_wakes says.
+        # As the MCP wait: see mailbox.channel_wakes.
         posts = [m["id"] for c in channels for m in self.app.channel_pending(c, agent)
                  if not (m["kind"] == "answer" and m["re"]["sender"] == agent)
-                 and (m["kind"] != "post" or post_wakes(m, agent, wake_filter))]
+                 and channel_wakes(m, agent, wake_filter)]
         self._json(200, {"line": len(line), "answers": len(answers), "talk": len(talk), "events": events,
                          "bang": bangs, "channels_waiting": len(posts),
                          "total": len(line) + len(answers) + len(talk) + len(posts),

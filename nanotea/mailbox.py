@@ -22,10 +22,22 @@ def post_wakes(post: dict, name: str, wake_filter: bool) -> bool:
                                              re.I))
 
 
+def elsewhere(m: dict, name: str) -> bool:
+    """The owner's reaction, tap or answer in a channel to another agent's message: it is for that agent alone."""
+    aimed = m["kind"] in ("reaction", "tap", "answer") or m.get("reaction") or m.get("tap")
+    return bool(aimed and m.get("re") and m["re"]["sender"].casefold() != name.casefold())
+
+
+def channel_wakes(m: dict, name: str, wake_filter: bool) -> bool:
+    """Whether an item from a channel wakes name: another agent's post as post_wakes says; the owner's words, but
+    not a reaction, tap or answer to another agent's message."""
+    return post_wakes(m, name, wake_filter) if m["kind"] == "post" else not elsewhere(m, name)
+
+
 def wakes(items: list[dict], name: str, wake_filter: bool) -> bool:
     """Whether what has come for name ends a wait now: the owner's words and answers, agents' messages, requests,
-    and posts as post_wakes says. Events and command results wait for something that does."""
-    return any(it["kind"] in URGENT or (it["kind"] == "post" and post_wakes(it, name, wake_filter)) for it in items)
+    and channel items as channel_wakes says. Events and command results wait for something that does."""
+    return any(channel_wakes(it, name, wake_filter) if "channel" in it else it["kind"] in URGENT for it in items)
 
 
 def starter() -> int:
