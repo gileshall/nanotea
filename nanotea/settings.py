@@ -96,7 +96,8 @@ SCHEMA = [
             lo=0, hi=HELD_PUSH_MAX_MIN),
     Setting("unheard_push_min", "agents", "Notify when unheard",
             "Notify you once a message of yours has waited this many minutes on a line whose agent isn't listening "
-            "or working on what it was handed. 0: never.", 10, lo=0, hi=HELD_PUSH_MAX_MIN),
+            "or working on what it was handed, or an agent has gone that long without listening after a hand-over. "
+            "0: never.", 10, lo=0, hi=HELD_PUSH_MAX_MIN),
     Setting("agent_messages", "agents", "Agent to agent messages",
             "off: agents can't message each other. shown: they can, and you see it under Agent talk. hidden: they "
             "can, and it stays between them.", "off", choices=tuple((v, v) for v in AGENT_MESSAGES)),

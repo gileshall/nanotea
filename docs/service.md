@@ -16,7 +16,7 @@ Data, under `data_dir`: `<id>/` holds an agent message's `meta.json`, `original.
 `attachments/`, and `reply.json` plus any reply audio. `inbox/` is the main inbox and `inbox-<name>/` each direct
 line. `voices.json` maps senders to voices; `reply_key` is the pairing key; `host_key` is the host key, read only by commands on this machine (`nanotea bang`); `tokens.json` holds the hashes of agents' tokens. `settings.json` holds the owner's
 settings (only once one is changed; until then the defaults). `groups.json` is the board's groups and
-`board-hidden.json` the names kept off it. `rules.json` is the standing rules and
+`board-hidden.json` the names kept off it. `presence.json` keeps who is held at a prompt and whose listener handed it messages, over a restart; `unheard.json`, what the owner was last told waits unheard on each line. `rules.json` is the standing rules and
 `rules-log.jsonl` every rule added or removed. `talk/<id>.json` is one agent's message to another, with when it was
 delivered. `nanotea.db` is an index, rebuilt from the files at each start; the files are the record. Agent sessions
 and who is held at a permission prompt are kept in memory: MCP servers register their sessions again after a

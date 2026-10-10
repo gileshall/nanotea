@@ -45,6 +45,16 @@ class Unheard(unittest.TestCase):
         self.app.handed["wren"] = (time.monotonic(), datetime.now().astimezone().isoformat())
         self.assertEqual(self.app.check_unheard(self.at + timedelta(minutes=10)), [])
 
+    def test_once_when_an_agent_stops_listening_after_a_hand_over(self):
+        box = self.app.boxes["main"]
+        box.mark_delivered("Wren", [self.msg["id"]], "pid 1")
+        self.app.handed["wren"] = (time.monotonic() - 3600, (self.at - timedelta(hours=1)).isoformat())
+        notes = self.app.check_unheard(self.at)
+        self.assertEqual([n.title for n in notes], ["Wren stopped listening"])
+        self.assertEqual(self.app.check_unheard(self.at + timedelta(minutes=5)), [])
+        self.app.handed["wren"] = (time.monotonic() - 1, self.at.isoformat())  # busy again: nothing to tell
+        self.assertEqual(self.app.check_unheard(self.at + timedelta(minutes=5)), [])
+
     def test_off_at_zero(self):
         self.app.settings.change({"unheard_push_min": 0})
         self.assertEqual(self.app.check_unheard(self.at + timedelta(hours=5)), [])

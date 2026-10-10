@@ -10,6 +10,7 @@ how to log an address.
 """
 
 import base64
+import copy
 import hashlib
 import hmac
 import ipaddress
@@ -432,9 +433,12 @@ class App:
         self.talk = TalkBook(self.store.root)
         # Open MCP sessions, in memory: session id -> {name, line, pid, since, beat (monotonic)}.
         self.sessions: dict[str, dict] = {}
-        # Agents at a harness permission prompt: name -> {at, what, pushed}.
+        # Agents at a harness permission prompt: casefolded name -> {name, at, what, pushed}.
         self.held: dict[str, dict] = {}
         self.presence_lock = threading.Lock()
+        # Who is held and whose listener handed over outlast a restart, which would otherwise show them closed.
+        self.presence_path = self.store.root / "presence.json"
+        self.load_presence()
         self.controls = built["controls"]
         self.control_lock = threading.Lock()
         self.tool_defs = tool_definitions(cfg)
@@ -694,23 +698,43 @@ class App:
                 inbox.update(m["id"], bang={**m["bang"], "state": state, "reason": reason, "finished_at": now_iso()})
                 self.bang_audit(state, id=m["id"], box=box, reason=reason, command=m["text"])
 
+    def load_presence(self) -> None:
+        if not self.presence_path.exists():
+            return
+        kept = json.loads(self.presence_path.read_text())
+        self.held = kept["held"]
+        now = datetime.now().astimezone()
+        # Monotonic times don't survive a restart; the wall time they were taken at does.
+        self.handed = {agent: (time.monotonic() - (now - datetime.fromisoformat(at)).total_seconds(), at)
+                       for agent, at in kept["handed"].items()}
+
+    def save_presence(self) -> None:
+        with self.presence_lock:
+            kept = {"held": copy.deepcopy(self.held), "handed": {a: at for a, (_, at) in self.handed.items()}}
+        tmp = self.presence_path.with_name(f".presence.json.{threading.get_ident()}")
+        tmp.write_text(json.dumps(kept, indent=2))
+        os.replace(tmp, self.presence_path)
+
     def hold(self, name: str, what: str | None) -> None:
         with self.presence_lock:
-            self.held.setdefault(name, {"at": now_iso(), "what": what, "pushed": False})["what"] = what
+            self.held.setdefault(_plain(name), {"name": name, "at": now_iso(), "what": what,
+                                                "pushed": False})["what"] = what
+        self.save_presence()
         log.info("%s is held at a permission prompt: %s", name, what or "(no detail)")
 
     def active(self, name: str) -> None:
         """The agent did something, so it isn't held at a prompt any more."""
         with self.presence_lock:
-            gone = self.held.pop(name, None)
+            gone = self.held.pop(_plain(name), None)
         if gone is not None:
+            self.save_presence()
             log.info("%s is no longer held (held since %s)", name, gone["at"])
 
     def held_of(self, name: str | None) -> dict | None:
         if name is None:
             return None
         with self.presence_lock:
-            h = self.held.get(name)
+            h = self.held.get(_plain(name))
             return {"at": h["at"], "what": h["what"]} if h else None
 
     def presence(self, box: str) -> tuple[str, str]:
@@ -779,10 +803,12 @@ class App:
                     continue
                 now = datetime.now().astimezone()
                 with self.presence_lock:
-                    due = [(n, h) for n, h in self.held.items() if not h["pushed"]
+                    due = [(h["name"], h) for h in self.held.values() if not h["pushed"]
                            and (now - datetime.fromisoformat(h["at"])).total_seconds() >= after * 60]
                     for _, h in due:
                         h["pushed"] = True
+                if due:
+                    self.save_presence()
                 for name, h in due:
                     box = self.box_of(name)
                     path = CHAT_PATH[box] if box else "/"
@@ -814,14 +840,26 @@ class App:
 
     def check_unheard(self, now: datetime) -> list[Note]:
         """Notes for lines where the owner's oldest waiting message has waited unheard_push_min and nothing is
-        listening for it, working on its last hand-over, or held (which notifies on its own). One a stall: the
-        message told of is kept in data/unheard.json, so a restart doesn't tell again."""
+        listening for it, working on its last hand-over, or held (which notifies on its own); and for agents away
+        that long since a listener handed them items. One a stall: what was told of is kept in data/unheard.json,
+        so a restart doesn't tell again."""
         after = self.settings.get()["unheard_push_min"]
         if not after:
             return []
         told = json.loads(self.unheard_path.read_text()) if self.unheard_path.exists() else {}
         notes = []
         for box, inbox in list(self.boxes.items()):
+            away = self.away(box)
+            if (away and told.get(f"away:{box}") != away
+                    and (now - datetime.fromisoformat(away)).total_seconds() >= after * 60):
+                holder = inbox.info()["holder"]
+                told[f"away:{box}"] = away
+                notes.append(Note(title=f"{pages.who(holder)} stopped listening",
+                                  text=f"Its listener handed it messages at {pages.clock(away)} and none has listened "
+                                       "since. What you send waits until one does.", path=CHAT_PATH[box],
+                                  link=f"{self.public_url}{CHAT_PATH[box]}?k={self.key}", tag=f"unheard-{box}",
+                                  unseen=self.unseen_count()))
+                continue
             words = [m for m in inbox.pending() if not m.get("event") and not m.get("bang")]
             if not words or told.get(box) == words[0]["id"]:
                 continue
@@ -1476,7 +1514,10 @@ class App:
     def handed_over(self, agent: str) -> None:
         """A listener that exits once it has printed (nanotea-tell, nanotea listen) took items for agent: until
         another polls, nothing is listening for it, however busy it is."""
-        self.handed[_plain(agent)] = (time.monotonic(), datetime.now().astimezone().isoformat(timespec="seconds"))
+        with self.presence_lock:
+            self.handed[_plain(agent)] = (time.monotonic(),
+                                          datetime.now().astimezone().isoformat(timespec="seconds"))
+        self.save_presence()
 
     def handover(self, box: str) -> tuple[str, str] | None:
         """(busy or away, since when) for a holder whose listener handed it items and exited; see after_handover."""
