@@ -3619,7 +3619,64 @@ CONFIG_SCRIPT = """
       const tr = table.insertRow();
       for (const text of [v.id, v.name, v.gender, v.locale]) tr.insertCell().textContent = cell(text);
     }
-    box.append(p, table);
+    const ids = new Set(out.voices.map((v) => v.id));
+    const taken = new Map(out.agents.filter((a) => a.voice).map((a) => [a.voice, a.name]));
+    const h = document.createElement("h3");
+    h.textContent = "Agents' voices";
+    const about = document.createElement("p");
+    about.className = "meta";
+    about.textContent = "Give an agent a voice here, as its own --voice would. A voice belongs to one agent.";
+    const agents = document.createElement("table");
+    agents.className = "voices";
+    for (const a of out.agents) {
+      const tr = agents.insertRow();
+      tr.insertCell().textContent = a.name;
+      const pick = document.createElement("select");
+      pick.setAttribute("aria-label", `${a.name}'s voice`);
+      if (!a.voice || !ids.has(a.voice)) {
+        const o = new Option(a.voice ? `${a.voice} (not a voice the engine has)` : "(none)", a.voice || "");
+        o.disabled = true;
+        pick.add(o);
+      }
+      for (const v of out.voices) {
+        const owner = taken.get(v.id);
+        pick.add(new Option(`${v.id}${v.name ? ` ${v.name}` : ""}${owner && owner !== a.name ? ` (${owner}'s)` : ""}`,
+                            v.id));
+      }
+      pick.value = a.voice || "";
+      const said = document.createElement("span");
+      said.className = "meta";
+      pick.onchange = async () => {
+        const owner = taken.get(pick.value);
+        const take = Boolean(owner && owner !== a.name);
+        const ask = `${pick.value} is ${owner}'s. Move it to ${a.name}? ${owner} has no voice until it picks one.`;
+        if (take && !confirm(ask)) {
+          pick.value = a.voice || "";
+          return;
+        }
+        said.className = "meta";
+        said.textContent = "Saving...";
+        try {
+          const r = await fetch("/api/voices/assign", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ agent: a.name, voice: pick.value, take }) });
+          const res = await r.json();
+          if (!r.ok) throw new Error(res.error || r.statusText);
+          said.textContent = res.taken_from ? `Set: ${res.voice}, taken from ${res.taken_from}` : `Set: ${res.voice}`;
+          if (a.voice) taken.delete(a.voice);
+          taken.set(res.voice, a.name);
+          a.voice = res.voice;
+          if (res.taken_from) location.reload();
+        } catch (err) {
+          said.className = "error";
+          said.textContent = `Not set: ${err.message}`;
+          pick.value = a.voice || "";
+        }
+      };
+      const td = tr.insertCell();
+      td.append(pick, " ", said);
+    }
+    box.append(p, table, h, about, agents);
   }).catch((err) => {
     box.innerHTML = "";
     const p = document.createElement("p");

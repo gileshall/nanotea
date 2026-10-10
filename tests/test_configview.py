@@ -185,6 +185,36 @@ class Pages(Case):
         self.assertIsNone(out["error"])
         self.assertEqual([v["id"] for v in out["voices"]][:2], ["v1", "v2"])
 
+    def test_the_owner_gives_an_agent_a_voice(self):
+        self.send("Ada", "first")
+        self.send("Bea", "second")
+        ada, bea = self.voice_of["Ada"], self.voice_of["Bea"]
+        free = self.free[-1]
+        rows = {a["name"]: a["voice"] for a in json.loads(self.call("GET", "/api/config/voices")[1])["agents"]}
+        self.assertEqual((rows["Ada"], rows["Bea"]), (ada, bea))
+
+        def assign(**body):
+            status, out = self.call("POST", "/api/voices/assign", body)
+            return status, json.loads(out)
+
+        self.assertEqual(assign(agent="ada", voice=free), (200, {"agent": "Ada", "voice": free, "was": ada,
+                                                                 "taken_from": None}))
+        status, out = assign(agent="Ada", voice="nope")
+        self.assertEqual((status, out["error"]), (400, "the voice engine has no voice 'nope'; pick one it lists"))
+        status, out = assign(agent="Nobody", voice=free)
+        self.assertEqual(status, 404, out)
+        status, out = assign(agent="Ada", voice=bea)
+        self.assertEqual((status, out["error"]), (409, f"voice {bea!r} belongs to 'Bea'; move it to 'Ada' to take it"))
+        self.assertEqual(assign(agent="Ada", voice=bea, take=True)[1]["taken_from"], "Bea")
+        rows = {a["name"]: a["voice"] for a in json.loads(self.call("GET", "/api/config/voices")[1])["agents"]}
+        self.assertEqual((rows["Ada"], rows["Bea"]), (bea, None))
+        self.voice_of["Ada"] = bea
+        self.voice_of["Bea"] = self.free.pop()  # the free voice Ada had, given back
+        self.assertEqual(assign(agent="Bea", voice=free)[0], 200)
+        self.assertEqual(self.call("POST", "/api/voices/assign", {"agent": "Ada", "voice": bea}, paired=False)[0], 401)
+        status, out = self.local("POST", "/api/voices/assign", {"agent": "Ada", "voice": bea}, as_="Bea")
+        self.assertEqual(status, 403, out)  # an agent can't give itself, or another, a voice this way
+
     def test_the_api_config_names_where_each_value_comes_from(self):
         view = json.loads(self.call("GET", "/api/config")[1])
         by = {s["id"]: s for s in view["sections"]}

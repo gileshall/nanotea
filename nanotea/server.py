@@ -123,6 +123,7 @@ OWNER_POSTS = re.compile(rf"/api/messages/{M}/(drafts|files|reply|delete|heard|r
                          rf"|/api/channels|/api/channels/{NAME}/(drafts|files|messages)"
                          rf"|/api/settings|/api/prompts|/api/rules|/api/rules/[0-9a-f]+/delete"
                          rf"|/api/read-all|/api/set-aside|/api/hush|/api/theme|/api/roster|/api/board"
+                         rf"|/api/voices/assign"
                          rf"|/api/tokens|/api/tokens/[0-9a-f]{{8}}/revoke|/api/approver|/api/config"
                          rf"|/api/config/secret")
 # What a token's holder reads as itself, named for it (?name=, or in the path): the owner's key may not.
@@ -763,6 +764,11 @@ class App:
         names = ([h for h in self.holders().values() if h] + list(self.listened.all())
                  + list(self.voices.owners().values()) + [s["name"] for s in self.open_sessions()])
         return {_plain(n): n for n in names}
+
+    def voiced_agents(self) -> dict[str, str]:
+        """Every agent the owner can give a voice: those known now, and any that ever sent, casefolded -> name."""
+        sent = [s for (s,) in self.store.index.rows("SELECT DISTINCT sender FROM msg", ())]
+        return {**{_plain(s): s for s in sent}, **self.known_agents()}
 
     def claim(self, box: str, name: str, about: str | None) -> dict:
         """An agent holds one line: two would give it two rows in the sidebar, each showing all its messages, and
@@ -2149,6 +2155,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._talk_delivered(body)
         if path == "/api/roster":
             return self._roster(body)
+        if path == "/api/voices/assign":
+            return self._assign_voice(body)
         if path == "/api/status":
             return self._set_status(body)
         if m := re.fullmatch(r"/api/agents/([^/]+)/answers/delivered", path):
@@ -3172,6 +3180,34 @@ class Handler(BaseHTTPRequestHandler):
         except (KeyError, TypeError, ValueError) as err:
             return self._json(400, {"error": f"{type(err).__name__}: {err}"})
         self._json(200, {"ok": True})
+
+    def _assign_voice(self, raw: bytes) -> None:
+        """The owner gives an agent a voice: {agent, voice, take}, as the agent's own --voice would, checked against
+        the voice engine's voices now. take: move it from the agent that has it."""
+        try:
+            body = json.loads(raw)
+            agent, voice, take = body["agent"], body["voice"], body.get("take", False)
+            if not (isinstance(agent, str) and agent.strip() and isinstance(voice, str) and voice.strip()):
+                raise ValueError("'agent' and 'voice' must be non-empty strings")
+            if not isinstance(take, bool):
+                raise ValueError("'take' must be true or false")
+            name = self.app.voiced_agents().get(_plain(agent.strip()))
+            if name is None:
+                return self._json(404, {"error": f"no agent named {agent.strip()!r} has been here"})
+            known = {v["id"] for v in self.app.tts.voices()}
+            if voice.strip() not in known:
+                return self._json(400, {"error": f"the voice engine has no voice {voice.strip()!r}; pick one it lists"})
+            before = self.app.voices.voice_of(name)
+            taken = self.app.voices.assign(name, voice.strip(), take)
+        except VoiceError as err:
+            return self._json(err.status, {"error": str(err)})
+        except RuntimeError as err:
+            return self._json(502, {"error": f"couldn't ask the voice engine for its voices: {err}"})
+        except (KeyError, TypeError, ValueError) as err:
+            return self._json(400, {"error": f"{type(err).__name__}: {err}"})
+        log.info("the owner set %s's voice: %s -> %s%s", name, before, voice.strip(),
+                 f", taken from {taken}, which has none now" if taken else "")
+        self._json(200, {"agent": name, "voice": voice.strip(), "was": before, "taken_from": taken})
 
     def _roster(self, raw: bytes) -> None:
         """Agents' voices and first names in one go: {"roster": [{from, voice, name}, ...]}. All or none."""

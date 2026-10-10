@@ -59,6 +59,22 @@ class VoiceBook:
         with self._lock:
             return {v: s for s, v in self._load().items()}
 
+    def assign(self, sender: str, voice: str, take: bool) -> str | None:
+        """The owner gives sender voice. take: from the agent that has it, which is left with none until it picks
+        again; without it, a voice another agent has is refused. Returns the agent it was taken from."""
+        with self._lock:
+            book = self._load()
+            owner = next((s for s, v in book.items() if v == voice and s != sender), None)
+            if owner is not None and not take:
+                raise VoiceError(409, f"voice {voice!r} belongs to {owner!r}; move it to {sender!r} to take it")
+            if owner is not None:
+                del book[owner]
+            book[sender] = voice
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(book, indent=2, sort_keys=True))
+            os.replace(tmp, self.path)
+            return owner
+
     def resolve(self, sender: str, requested: str | None) -> str:
         with self._lock:
             book = self._load()

@@ -374,6 +374,10 @@ the new engine doesn't have can't be voiced until it picks one (`nanotea-tell --
 says so, and voicing again checks before it sets anything aside. A config change to `[tts]` from the app lists the
 engine's voices before it saves, so a model that no voice supports is refused there.
 
+The owner can give any agent a voice without the agent doing anything: Settings > Configuration, Voice, Agents'
+voices. It checks the voice against the engine's list, as `--voice` does. A voice another agent has is moved only
+after the owner confirms, and that agent has none until it picks one or the owner gives it one.
+
 A new data directory's owner starts from `[settings]` in the config, if there is one: the same keys and values,
 checked when the service starts. The owner's own changes, kept in `data/settings.json`, win.
 

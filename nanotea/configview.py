@@ -221,12 +221,14 @@ def control_section(app) -> dict:
 
 def voices(app) -> dict:
     """The voice engine's voices, asked when the page is open: a server may be down, which is said, not hidden."""
+    agents = [{"name": n, "voice": app.voices.voice_of(n)} for n in sorted(app.voiced_agents().values(), key=str.casefold)]
     try:
         found = app.tts.voices()
     except Exception as err:
-        return {"error": f"{type(err).__name__}: {err}", "voices": []}
-    return {"error": None, "voices": [{"id": v["id"], "name": v.get("name"), "gender": v.get("gender"),
-                                       "locale": v.get("locale")} for v in found]}
+        return {"error": f"{type(err).__name__}: {err}", "voices": [], "agents": agents}
+    return {"error": None, "agents": agents,
+            "voices": [{"id": v["id"], "name": v.get("name"), "gender": v.get("gender"), "locale": v.get("locale")}
+                       for v in found]}
 
 
 def prompts(app) -> dict:
