@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import unittest
 
 from mcp import Client
@@ -29,7 +30,10 @@ class Settings(unittest.TestCase):
         table = delivery.settings({"delivery": {"mode": "push", "agents": {"desk": "listen"}}})
         self.assertEqual((delivery.mode_for(table, "desk"), delivery.mode_for(table, "other"),
                           delivery.mode_for(table, None)), ("listen", "push", "push"))
+        self.assertEqual(delivery.mode_for(table, "DESK"), "listen")  # names match whatever their case
         for bad, says in (({"delivery": []}, r"\[delivery\] must be a table"),
+                          ({"delivery": {"agents": {"desk": "push", "Desk": "poll"}}},
+                           "'desk' and 'Desk' are the same agent"),
                           ({"delivery": {"mood": "poll"}}, r"\[delivery\] mood: unknown; known: mode, agents"),
                           ({"delivery": {"mode": "pull"}}, "mode must be one of poll, push, listen, not 'pull'"),
                           ({"delivery": {"agents": ["desk"]}}, "agents must be a table"),
@@ -90,6 +94,40 @@ class Modes(Case):
         self.assertEqual((status, json.loads(out)["error"]), (400, "ValueError: 'channels' must be a list of channel names"))
         view = json.loads(self.owner("GET", "/api/settings")[1])
         self.assertEqual(view["delivery"]["agents"]["Lister"], "listen")
+
+    def test_channel_items_count_as_they_would_end_a_wait(self):
+        self.open("Heeder", ["general"])
+        self.local("GET", "/api/channels/general/pending?name=Heeder")  # its cursor starts here
+        self.send("poster", "routine chatter", channel="general")
+        w = self.waiting("Heeder")
+        self.assertEqual((w["channels_waiting"], w["total"]), (0, 0))
+        mention = self.send("poster", "@heeder can you look?", channel="general")
+        w = self.waiting("Heeder")
+        self.assertEqual((w["channels_waiting"], w["total"], w["ids"]), (1, 1, [mention]))
+        try:
+            self.assertEqual(self.call("POST", "/api/settings", {"wake_filter": False})[0], 200)
+            self.assertEqual(self.waiting("Heeder")["channels_waiting"], 2)
+        finally:
+            self.assertEqual(self.call("POST", "/api/settings", {"wake_filter": True})[0], 200)
+
+    def test_tell_listen_wakes_for_a_mention_not_chatter(self):
+        self.local("GET", "/api/channels/general/pending?name=Teller")  # its cursor starts here
+        proc = subprocess.Popen([sys.executable, "-m", "nanotea.tell", "--from", "Teller", "--listen", "--channel",
+                                 "general"], cwd=self.tmp.name, env=self.env_for("Teller"), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        try:
+            self.send("poster", "routine chatter for the room", channel="general")
+            time.sleep(7)  # two polls of the listener's
+            self.assertIsNone(proc.poll(), proc.stderr.read() if proc.poll() is not None else "")
+            self.send("poster", "@Teller the build is red", channel="general")
+            out, err = proc.communicate(timeout=30)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertIn("routine chatter for the room", out)  # it comes with what woke it
+        self.assertIn("@Teller the build is red", out)
 
     def test_push_hands_over_after_a_tool_call_only_in_push_mode(self):
         self.open("Plain")

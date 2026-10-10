@@ -264,7 +264,7 @@ def prompts(app) -> dict:
         "tools": [{"name": n, "description": d["description"]} for n, d in app.tool_defs.items()],
         "other": [{"what": "The on_call prompt agents can invoke", "text": on_call_text(owner, None)},
                   {"what": "What the stop and wake hooks say to an agent with messages waiting",
-                   "text": note(owner, {"line": 2, "events": 0, "answers": 1, "talk": 0})}],
+                   "text": note(owner, {"line": 2, "events": 0, "answers": 1, "talk": 0, "channels_waiting": 0})}],
     }
     return scrub(out, app.secret_values)
 

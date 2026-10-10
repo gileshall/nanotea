@@ -55,7 +55,8 @@ def note(owner: str, w: dict) -> str:
     parts = [f"{n} {what}" for n, what in ((w["line"] - w["events"], f"message(s) from {owner}"),
                                            (w["events"], "event(s)"),
                                            (w["answers"], "answer(s) to your questions"),
-                                           (w["talk"], "message(s) from other agents")) if n]
+                                           (w["talk"], "message(s) from other agents"),
+                                           (w["channels_waiting"], "item(s) in your channels")) if n]
     return f"Nanotea: {' and '.join(parts)} waiting. Call the nanotea check tool and act on them."
 
 

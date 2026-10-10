@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+import functools
 import json
 import os
 import re
@@ -19,7 +20,7 @@ from nanotea.bang import OWNER_ONLY_NOTE, Host
 from nanotea.client import Client, NanoteaError
 from nanotea.config import load_config
 from nanotea.credentials import obtain
-from nanotea.mailbox import starter, starter_gone
+from nanotea.mailbox import post_wakes, starter, starter_gone
 
 _cfg = load_config()
 OWNER, PORT = _cfg["app"]["owner"], _cfg["port"]
@@ -312,6 +313,13 @@ def again(args: list[str]) -> None:
     os.execv(sys.executable, [sys.executable, "-m", "nanotea.tell", *args])
 
 
+def wakes(base: str, sender: str, batches: list) -> bool:
+    """Whether what came in the channels ends the wait, as it would an MCP wait: the owner's words always, another
+    agent's post as the wake filter says. The rest waits for something that does."""
+    wake_filter = request(f"{base}/api/settings", outlast=True)["settings"]["wake_filter"]
+    return any(m["kind"] != "post" or post_wakes(m, sender, wake_filter) for _, pending, _ in batches for m in pending)
+
+
 def _listen(base: str, sender: str, about: str | None, box: str | None, channels: list[str], idle: bool,
             once: bool = False) -> bool:
     """Whether the service was upgraded: False once a batch is printed. once: --check, which never waits."""
@@ -337,27 +345,25 @@ def _listen(base: str, sender: str, about: str | None, box: str | None, channels
               f"{json.dumps(sender)} --typing {where}", file=sys.stderr)
     listener = taker("--check" if once else "--listen")
     while True:
-        got = False
+        batches, on_line = [], False
         if api:
             pending = request(f"{api}/pending?{inbox_query}", outlast=True)
             if pending and all(m.get("bang") for m in pending):
                 pending = []  # results of commands wait for something that is for the agent
             if pending:
-                orphaned(parent)
-                print_inbox(pending)
-                request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener,
-                                              "ends": True}, outlast=True)
-                got = True
+                batches.append((f"{api}/delivered", pending, print_inbox))
+                on_line = True
         for channel in channels:
             ch = f"{base}/api/channels/{channel}"
             pending = request(f"{ch}/pending?{query}", outlast=True)
             if pending:
-                orphaned(parent)
-                print_channel(channel, pending)
-                request(f"{ch}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener,
-                                              "ends": True}, outlast=True)
-                got = True
-        if got:
+                batches.append((f"{ch}/delivered", pending, functools.partial(print_channel, channel)))
+        if batches and (once or on_line or wakes(base, sender, batches)):
+            orphaned(parent)
+            for path, pending, show in batches:
+                show(pending)
+                request(path, {"name": sender, "ids": [m["id"] for m in pending], "listener": listener, "ends": True},
+                        outlast=True)
             return False
         if once:
             print("nanotea-tell: nothing new", file=sys.stderr)

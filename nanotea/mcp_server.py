@@ -24,7 +24,6 @@ import datetime
 import functools
 import json
 import os
-import re
 import secrets
 import sys
 import threading
@@ -42,7 +41,7 @@ from nanotea.client import Client, NanoteaError, line_for, segment
 from nanotea import version
 from nanotea.config import load_config
 from nanotea.credentials import agent_token, ask, collect, token_file, waiting_on
-from nanotea import delivery, quirks
+from nanotea import delivery, mailbox, quirks
 from nanotea.listen import command as listen_command
 from nanotea.mailbox import Mailbox, request_item
 from nanotea.relay import EXIT_UPGRADED, STATE_ENV
@@ -54,8 +53,6 @@ PROGRESS_S = 10
 WAIT_DEFAULT_S = quirks.Quirks.wait_s
 WAIT_MAX_S = 3600
 HEARTBEAT_S = 20
-# These end a wait at once.
-URGENT = {"message", "reaction", "tap", "answer", "failed", "set_aside", "agent", "request", "upgraded"}
 
 
 class Waiting(ToolError):
@@ -320,17 +317,7 @@ class Agent:
         return out
 
     def wakes(self, items: list[dict]) -> bool:
-        """Whether what has come ends a wait now: the owner's words and answers, agents' messages, and (with the
-        wake filter off) any post; a post that @mentions this agent always does."""
-        mention = re.compile(rf"@{re.escape(self.name)}\b", re.I)
-        for it in items:
-            if it["kind"] in URGENT:
-                return True
-            if it["kind"] == "post" and (not self.settings["wake_filter"]
-                                         or mention.search(f"{it['title'] or ''} {it['text']}")):
-                return True
-        return False
-
+        return mailbox.wakes(items, self.name, self.settings["wake_filter"])
 
 
 RE_DOC = """

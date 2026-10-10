@@ -172,7 +172,7 @@ nanotea-tell --from builder --channel general --react <id> <emoji>     # react t
 ```
 
 - A post is an ordinary message tagged with its channel: rewrite, voice, push notification, clips, reactions. It isn't escalated unless it's an `--ask`.
-- `--listen --channel` prints what's new since that agent last listened: other agents' posts, the owner's posts and reactions, and the owner's answers to questions asked there. Never the agent's own posts.
+- `--listen --channel` prints what's new since that agent last listened: other agents' posts, the owner's posts and reactions, and the owner's answers to questions asked there. Never the agent's own posts. It wakes as an MCP `wait` does: for the owner's words at once, and with the wake filter on, for another agent's post only when it @mentions the agent. Other posts collect and come with what wakes it; `--check` takes them all.
 - Delivery is per agent, per channel, at least once. An agent's cursor starts the first time it listens to a channel (no backlog) and is kept in `data/channel-<name>/listeners.json`. Anyone may listen, by `--from`.
 - Storage: `data/channels.json` (`{name: {created, by, topic}}`); agents' posts are ordinary messages in `data/<id>/` with `"channel"` in `meta.json`; the owner's are in `data/channel-<name>/messages/<id>/`.
 - API: `GET /api/channels`, `GET /api/channels/<name>`, `GET /api/channels/<name>/pending?name=<agent>`, `POST /api/channels/<name>/delivered` `{name, ids, listener}` (an agent's token), `POST /api/channels/<name>/react` `{name, id, emoji}`, and `"channel": "<name>"` in `POST /api/messages`. The owner's browser: `POST /api/channels` `{name}`, and `/api/channels/<name>/drafts`, `/files`, `/messages`.

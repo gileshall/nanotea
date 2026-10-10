@@ -269,6 +269,8 @@ No MCP feature can put a message in front of an idle model, so nanotea uses thre
    returns at once only for the owner's words, reactions and answers, other agents' messages, and posts that
    @mention the agent; other posts collect until the wait ends, and come with it. With Batch events on, an
    event lets others arrive for 5 seconds before `wait` hands them over together.
+   `nanotea-tell --listen`, the wake hook, the stop hook and `nanotea listen` follow the same rule for
+   channels.
 2. Stop hooks. `nanotea hook stop` runs when the agent's turn ends: if anything of the owner's is waiting, it
    exits 2 with a note on stderr (Claude Code, Codex, Gemini) or prints a `followup_message` (Cursor), and the
    agent goes on to check it. It sends an agent back once per turn.

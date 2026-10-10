@@ -42,6 +42,7 @@ from nanotea.config import CONFIG, Config, ConfigError, load_config, load_env_fi
 from nanotea.hush import HushBook, HushError
 from nanotea.index import parse_cursor, thread_key, thread_of_owner
 from nanotea.inbox import Inbox, InboxError, excerpt
+from nanotea.mailbox import post_wakes
 from nanotea.mcp_server import tool_definitions
 from nanotea.notify import Note
 from nanotea.pages import API_SEGMENT, BOX_LABEL, CHAT_PATH, DM_NAME
@@ -3365,7 +3366,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _agent_get(self, agent: str, what: str, query: dict) -> None:
         """answers: the agent's undelivered answers (see answers). waiting: how much of the owner's is ready for
-        it, without taking it: {line, answers, bang, total, ids, delivery, channels}; bang counts the commands'
+        it, without taking it: {line, answers, talk, channels_waiting, bang, total, ids, delivery, channels};
+        channels_waiting counts what in its channels would end an MCP wait; bang counts the commands'
         results, which are in neither total nor ids: they don't wake an agent. delivery: its mode ([delivery]);
         channels: those its sessions listen in. ?line=<segment> counts that inbox too, if it holds it; with &idle=1
         says the agent is idle and listening there (a wake hook waiting on its behalf), and with &listen=1 only
@@ -3402,12 +3404,18 @@ class Handler(BaseHTTPRequestHandler):
         answers = [a["id"] for a in self.app.answers(agent)]
         talk = [m["id"] for m in self.app.talk.pending(agent)]
         rules = self.app.rules.for_agent(agent)
+        channels = self.app.channels_of(agent)
+        wake_filter = self.app.settings.get()["wake_filter"]
+        # As the MCP wait: the owner's words in a channel wake it; another agent's post only as post_wakes says.
+        posts = [m["id"] for c in channels for m in self.app.channel_pending(c, agent)
+                 if not (m["kind"] == "answer" and m["re"]["sender"] == agent)
+                 and (m["kind"] != "post" or post_wakes(m, agent, wake_filter))]
         self._json(200, {"line": len(line), "answers": len(answers), "talk": len(talk), "events": events,
-                         "bang": bangs,
-                         "total": len(line) + len(answers) + len(talk), "ids": line + answers + talk,
+                         "bang": bangs, "channels_waiting": len(posts),
+                         "total": len(line) + len(answers) + len(talk) + len(posts),
+                         "ids": line + answers + talk + posts,
                          "rules_v": self.app.rules.version(rules),
-                         "delivery": delivery.mode_for(self.app.delivery, agent),
-                         "channels": self.app.channels_of(agent)})
+                         "delivery": delivery.mode_for(self.app.delivery, agent), "channels": channels})
 
     def _answers_delivered(self, agent: str, raw: bytes) -> None:
         """{ids, listener}: the asker was given these questions' outcomes. aside-<id>: told it was set aside."""

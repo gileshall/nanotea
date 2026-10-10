@@ -34,12 +34,19 @@ def settings(cfg: dict) -> dict:
     agents = table.get("agents", {})
     if not isinstance(agents, dict):
         raise ConfigError("[delivery] agents must be a table of agent name = mode")
+    seen: dict[str, str] = {}
     for name, m in agents.items():
         if m not in MODES:
             raise ConfigError(f"[delivery] agents: {name!r} has mode {m!r}; modes are {', '.join(MODES)}")
+        if name.casefold() in seen:
+            raise ConfigError(f"[delivery] agents: {seen[name.casefold()]!r} and {name!r} are the same agent; "
+                              f"names match whatever their case, so keep one")
+        seen[name.casefold()] = name
     return {"mode": mode, "agents": dict(agents)}
 
 
 def mode_for(table: dict, name: str | None) -> str:
-    """name's mode; an agent not named in agents, or not yet joined, has the default."""
-    return table["agents"].get(name, table["mode"]) if name else table["mode"]
+    """name's mode, matched whatever its case; an agent not named in agents, or not yet joined, has the default."""
+    if not name:
+        return table["mode"]
+    return next((m for k, m in table["agents"].items() if k.casefold() == name.casefold()), table["mode"])

@@ -5,12 +5,27 @@ items whichever way they reach it."""
 
 import json
 import os
+import re
 from urllib.parse import quote
 
 from nanotea.bang import OWNER_ONLY_NOTE
 from nanotea.client import Client, segment
 
 STARTER_ENV = "NANOTEA_LISTENER_STARTER"
+# Kinds that end a wait at once. Posts do when they @mention the agent, or with the wake filter off.
+URGENT = {"message", "reaction", "tap", "answer", "failed", "set_aside", "agent", "request", "upgraded"}
+
+
+def post_wakes(post: dict, name: str, wake_filter: bool) -> bool:
+    """Whether another agent's post in a channel wakes name: with the wake filter on, only one that @mentions it."""
+    return not wake_filter or bool(re.search(rf"@{re.escape(name)}\b", f"{post.get('title') or ''} {post['text']}",
+                                             re.I))
+
+
+def wakes(items: list[dict], name: str, wake_filter: bool) -> bool:
+    """Whether what has come for name ends a wait now: the owner's words and answers, agents' messages, requests,
+    and posts as post_wakes says. Events and command results wait for something that does."""
+    return any(it["kind"] in URGENT or (it["kind"] == "post" and post_wakes(it, name, wake_filter)) for it in items)
 
 
 def starter() -> int:
