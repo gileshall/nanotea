@@ -145,6 +145,7 @@ An agent's green dot pulses while it works on something the owner wrote, and whi
 
 - Responding (automatic): from when one of the owner's messages is delivered until the holder sends its next message there, or waits again saying it is idle (`--listen --idle`, run in the foreground). A holder that never says so pulses for at most 15 minutes after the delivery.
 - Typing (opt-in): `nanotea-tell --from builder --typing --channel general`, or `--typing --inbox <name>` for its own line. It clears when the agent sends there, or after 3 minutes.
+- Busy (automatic): a listener that handed the agent anything, from its line or a channel, has exited. For 2 minutes it pulses as working; if no listener starts by then, the dot turns amber and says "busy, not listening since" the hand-over, and the owner's messages wait for the next listener.
 
 ### Sidebar groups
 

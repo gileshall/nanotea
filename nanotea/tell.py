@@ -414,9 +414,9 @@ def board(base: str, stale: int | None) -> None:
     def state(r: dict) -> str:
         if r["connected"]:
             why = [w for w, on in (("listening", r["listening"]), ("responding", r["responding"]),
-                                   ("typing", r["typing"])) if on]
+                                   ("busy", r.get("busy")), ("typing", r["typing"])) if on]
             if r.get("away"):  # its listener exited after handing it messages; none has started since
-                why.append(f"not listening since {ago(r['away'])}")
+                why.append(f"busy, not listening since {ago(r['away'])}")
             return "connected: " + (", ".join(why) or f"listened {ago(r['listened'])}")
         return f"not connected, last seen {ago(r['seen'])}" if r["seen"] else "not connected, never seen"
 

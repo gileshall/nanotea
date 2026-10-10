@@ -857,7 +857,7 @@ class Service(Tokens, unittest.TestCase):
         self.assertNotIn("nothing new", r.stderr)
         self.assertIn("nothing new", check().stderr)
 
-    def test_a_listener_that_ended_shows_nobody_listening(self):
+    def test_a_listener_that_ended_shows_its_agent_busy(self):
         def listening():
             board = json.loads(self.local("GET", "/api/board")[1])
             return any(r["agent"] == "Ola" and r["listening"] for g in board["sidebar"]["groups"] for r in g["rows"])
@@ -872,15 +872,16 @@ class Service(Tokens, unittest.TestCase):
             self.stop(listener)
         self.assertIn("while you work", out)
         self.wait_for(lambda: not self.row("Ola")[1]["listening"], "the listening window to pass")
-        away = self.row("Ola")[1]["away"]
-        self.assertIsNotNone(away)
-        self.assertIn("not listening since", self.tell("--board"))
+        # Busy while it works on what it was handed: not away, which only RELISTEN_GRACE_S without a listener is.
+        row = self.row("Ola")[1]
+        self.assertEqual((row["busy"], row["away"], row["connected"]), (True, None, True))
+        self.assertIn("busy", self.tell("--board"))
+        self.assertNotIn("not listening since", self.tell("--board"))
         self.assertEqual(self.call("POST", "/api/dm-ola/messages", {"text": "and this waits"})[0], 200)
         status, page = self.call("GET", "/chat/ola")
         self.assertEqual(status, 200)
-        self.assertIn("not listening since", page)
-        self.assertIn("yours wait until it does", page)
-        self.assertIn('<span class="stl away"><span class="st-text">not listening</span>', page)
+        self.assertIn("working on what its listener handed it", page)
+        self.assertNotIn("not listening", page)
         # Another listener takes it, and the line is listened to again.
         listener = self.listen("--from", "Ola", "--inbox", "ola")
         try:
@@ -891,7 +892,7 @@ class Service(Tokens, unittest.TestCase):
         listener = self.listen("--from", "Ola", "--inbox", "ola")
         try:
             self.wait_for(listening, "Ola's next listener")
-            self.assertIsNone(self.row("Ola")[1]["away"])
+            self.assertEqual((self.row("Ola")[1]["away"], self.row("Ola")[1]["busy"]), (None, False))
         finally:
             self.stop(listener)
         status, body = self.local("POST", "/api/dm-ola/delivered", {"name": "Ola", "ids": [], "ends": "yes"},

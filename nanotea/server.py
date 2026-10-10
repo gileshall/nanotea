@@ -157,6 +157,14 @@ def _plain(s: str) -> str:
     return s.casefold()
 
 
+def after_handover(handed: float | None, listening: bool, last_listen: float, now: float) -> str | None:
+    """What an agent whose listener handed it items and exited is doing, with none polling since: busy for
+    RELISTEN_GRACE_S, as it reads and answers, then away. None once a listener polls again."""
+    if handed is None or listening or last_listen > handed:
+        return None
+    return "busy" if now - handed < RELISTEN_GRACE_S else "away"
+
+
 def ends(body: dict) -> bool:
     """A receipt's "ends": true says the taker exits now that it has printed, so nothing listens for the agent."""
     flag = body.get("ends", False)
@@ -704,9 +712,9 @@ class App:
             return {"at": h["at"], "what": h["what"]} if h else None
 
     def presence(self, box: str) -> tuple[str, str]:
-        """Who is there to pick up what the owner sends on a line: (state, words). state: held, listening, away
-        (its listener handed it messages and exited, and none has polled since), open (a session is open but not
-        checking now), closed, or nobody (no holder)."""
+        """Who is there to pick up what the owner sends on a line: (state, words). state: held, listening, busy (its
+        listener handed it messages and exited moments ago), away (busy past RELISTEN_GRACE_S, none polling since),
+        open (a session is open but not checking now), closed, or nobody (no holder)."""
         holder = self.boxes[box].info()["holder"]
         if holder is None:
             return "nobody", "nobody holds this line"
@@ -714,9 +722,11 @@ class App:
             return "held", f"held at a permission prompt since {pages.clock(held['at'])}"
         if self.listening(box):
             return "listening", "listening now"
+        if self.busy(box):
+            return "busy", "working on what its listener handed it; it listens again when it is done"
         if away := self.away(box):
-            return "away", (f"not listening since {pages.clock(away)}: its listener handed it messages and it hasn't "
-                            "listened again; yours wait until it does")
+            return "away", (f"busy, not listening since {pages.clock(away)}: its listener handed it messages and it "
+                            "hasn't listened again; yours wait until it does")
         if self.open_sessions(holder):
             last = self.listened.all().get(holder)
             return "open", ("session open, " + (f"last checked {pages.ago(last)}" if last else "hasn't checked yet"))
@@ -941,12 +951,12 @@ class App:
             typing = [a for a in self.typing_in(box) if a == holder]
             row = {"path": CHAT_PATH[box], "name": title[0], "role": " · ".join(title[1:]), "who": pages.who(sender),
                    "mark": sender, "agent": holder, "unread": count((s, None) for s in senders if owner[s] == box),
-                   "listening": self.listening(box), "away": self.away(box),
+                   "listening": self.listening(box), "away": self.away(box), "busy": self.busy(box),
                    "status": statuses.get(holder) if holder else None,
                    "typing": typing, "responding": bool(holder) and self.responding(box, info, sent),
                    "listened": listened.get(holder) if holder else None,
                    "session": self.session_of(holder), "held": self.held_of(holder)}
-            row["connected"] = bool(holder) and (row["listening"] or row["responding"] or bool(typing)
+            row["connected"] = bool(holder) and (row["listening"] or row["responding"] or row["busy"] or bool(typing)
                                                  or bool(row["session"]) or recent(listened.get(holder)))
             row["seen"] = None if row["connected"] else _latest(
                 listened.get(holder) if holder else None, info.get("since"),
@@ -958,6 +968,7 @@ class App:
             row = {"path": f"/?from={quote(s)}", "name": names.get(s) or s,
                    "role": plain if _plain(plain) != _plain(names.get(s) or s) else "", "who": pages.who(s),
                    "mark": s, "agent": s, "unread": count([(s, None)]), "listening": False, "away": None,
+                   "busy": False,
                    "status": statuses.get(s),
                    "typing": [], "responding": False, "listened": listened.get(s), "session": self.session_of(s),
                    "held": self.held_of(s)}
@@ -1404,13 +1415,24 @@ class App:
         another polls, nothing is listening for it, however busy it is."""
         self.handed[_plain(agent)] = (time.monotonic(), datetime.now().astimezone().isoformat(timespec="seconds"))
 
-    def away(self, box: str) -> str | None:
-        """Since when the holder's listener handed it messages and exited, with none polling since; else None."""
+    def handover(self, box: str) -> tuple[str, str] | None:
+        """(busy or away, since when) for a holder whose listener handed it items and exited; see after_handover."""
         holder = self.boxes[box].info()["holder"]
         handed = self.handed.get(_plain(holder)) if holder else None
-        if handed is None or self.listening(box) or self.last_listen[box] > handed[0]:
+        if handed is None:
             return None
-        return handed[1]
+        state = after_handover(handed[0], self.listening(box), self.last_listen[box], time.monotonic())
+        return (state, handed[1]) if state else None
+
+    def away(self, box: str) -> str | None:
+        """Since when the holder has gone RELISTEN_GRACE_S without a listener after one handed it items; else None."""
+        state = self.handover(box)
+        return state[1] if state and state[0] == "away" else None
+
+    def busy(self, box: str) -> bool:
+        """Its listener handed it items within RELISTEN_GRACE_S and it is working on them."""
+        state = self.handover(box)
+        return bool(state) and state[0] == "busy"
 
     def transcribe_reply(self, msg_id: str) -> None:
         recording = self.store.path(msg_id, self.store.reply(msg_id)["audio"])

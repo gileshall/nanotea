@@ -1329,15 +1329,15 @@ def _age_span(iso: str, mode: str = "short", cls: str = "age") -> str:
 def _sidebar(bar: dict) -> str:
     def row(c: dict, channel: bool) -> str:
         unread = f'<span class="count">{c["unread"]}</span>' if c["unread"] else ""
-        pulse = bool(c["typing"]) or c.get("responding", False)
+        pulse = bool(c["typing"]) or c.get("responding", False) or c.get("busy", False)
         held = c.get("held")
         away = None if held or c["listening"] else c.get("away")
         why = ("held at a permission prompt" if held
                else f'{", ".join(who(a) for a in c["typing"])} typing' if c["typing"]
-               else "working on your message" if pulse else "listening")
+               else "working on your message" if c.get("responding") else "working" if pulse else "listening")
         if away:
             why = ((f"{why}; " if pulse else "")
-                   + f"not listening since {clock(away)}; your messages wait until it listens again")
+                   + f"busy, not listening since {clock(away)}; your messages wait until it listens again")
         kind = " held" if held else " pulse" if pulse else " away" if away else ""
         dot = (f'<span class="dot{kind}" title="{e(why)}"></span>'
                if c["listening"] or pulse or held or away else "")
@@ -1350,7 +1350,7 @@ def _sidebar(bar: dict) -> str:
         if held:
             role += f'<span class="stl held"><span class="st-text">held at a permission prompt</span>{_age_span(held["at"])}</span>'
         if away:
-            role += f'<span class="stl away"><span class="st-text">not listening</span>{_age_span(away)}</span>'
+            role += f'<span class="stl away"><span class="st-text">busy, not listening</span>{_age_span(away)}</span>'
         st = c["status"]
         if st:
             role += f'<span class="stl"><span class="st-text">{e(st["text"])}</span>{_age_span(st["at"])}</span>'
