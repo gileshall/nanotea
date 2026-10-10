@@ -979,6 +979,35 @@ APP_SCRIPT = """
     player.play().catch((err) => { note.textContent = `Tap play: ${err.message}`; });
   });
 
+  // Voice again: the server voices the message anew with the engine set now, keeping the earlier voicing.
+  document.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("[data-revoice]");
+    if (!btn || btn.disabled) return;
+    const id = btn.dataset.revoice;
+    const article = btn.closest("article");
+    article.querySelector(".revoice-note")?.remove();
+    const note = Object.assign(document.createElement("div"), { className: "meta revoice-note",
+                                                                textContent: "Voicing again..." });
+    const player = article.querySelector(`audio[data-id="${id}"]`);
+    (player || article.querySelector(".subject")).after(note);
+    btn.disabled = true;
+    try {
+      const r = await fetch(`/api/messages/${id}/revoice`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const out = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      if (!r.ok) throw new Error(out.error || `HTTP ${r.status}`);
+      if (!player) { location.reload(); return; }
+      player.src = out.audio;
+      note.textContent = "Voiced again.";
+      player.play().catch((err) => { note.textContent = `Voiced again. Tap play: ${err.message}`; });
+    } catch (err) {
+      note.className = "error revoice-note";
+      note.textContent = `Couldn't voice it again: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // A clip named in the text plays, or pauses, in its player under the text.
   document.addEventListener("click", (ev) => {
     const btn = ev.target.closest("[data-clip]");
@@ -1162,6 +1191,9 @@ MENU_ICON = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 SPEAK_ICON = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
               'stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/>'
               '<path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>')
+REVOICE_ICON = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+                'stroke-linejoin="round" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 '
+                '13.2-4.9"/><path d="M18 3.5v3.8h-3.8M6 20.5v-3.8h3.8"/></svg>')
 CHECK_ICON = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" '
               'stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>')
 PLAY_ICON = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>')
@@ -2754,6 +2786,9 @@ def _article(store: Store, msg: Message, mode: str, holders: dict[str, str | Non
     if msg.audio is None and msg.status == "done":
         speak = (f'<button type="button" class="tool" data-speak="{msg.id}" data-title="{e(title)}" '
                  f'data-artist="{e(sender)}" aria-label="Voice it" title="Voice it">{SPEAK_ICON}</button>')
+    elif msg.audio is not None and msg.status == "done":
+        speak = (f'<button type="button" class="tool" data-revoice="{msg.id}" aria-label="Voice it again" '
+                 f'title="Voice it again, with the voice engine set now">{REVOICE_ICON}</button>')
     parts.append(f'<div class="subject"><a href="/m/{msg.id}">{e(title)}</a>{"".join(tags)}{speak}</div>')
     if msg.error:
         parts.append(f'<p class="error">{e(msg.error)}</p>')

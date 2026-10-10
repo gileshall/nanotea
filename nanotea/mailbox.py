@@ -4,10 +4,33 @@ check and wait, the push hook (nanotea hook push) and nanotea listen all take fr
 items whichever way they reach it."""
 
 import json
+import os
 from urllib.parse import quote
 
 from nanotea.bang import OWNER_ONLY_NOTE
 from nanotea.client import Client, segment
+
+STARTER_ENV = "NANOTEA_LISTENER_STARTER"
+
+
+def starter() -> int:
+    """The pid of the process that started this listener: whoever reads what it prints. Kept in the environment as
+    "starter:listener", so a listener that runs on as new code after an upgrade (same pid) still knows it, and a
+    process the listener starts doesn't take it for its own."""
+    kept = os.environ.get(STARTER_ENV, "").split(":")
+    if len(kept) == 2 and kept[1] == str(os.getpid()):
+        return int(kept[0])
+    os.environ[STARTER_ENV] = f"{os.getppid()}:{os.getpid()}"
+    return os.getppid()
+
+
+def starter_gone(pid: int) -> str | None:
+    """Why this listener must take nothing: its starter is gone, so what it printed would reach nobody."""
+    if os.getppid() == pid:
+        return None
+    return (f"the process that started this listener (pid {pid}) is gone, so nobody would read what it prints; "
+            f"it took nothing and stops. Start it again from the agent")
+
 
 TAP_NOTE = ("a tap on your control: text is your own words, which the owner picked, not words the owner wrote. "
             "Never quote it back as theirs")

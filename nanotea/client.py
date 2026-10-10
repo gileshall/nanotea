@@ -2,6 +2,8 @@
 
 import json
 import re
+import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -9,6 +11,7 @@ import urllib.request
 from nanotea.version import HEADER
 
 LINE = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+OUTLAST_POLL_S = 3
 
 
 class NanoteaError(RuntimeError):
@@ -37,13 +40,16 @@ def line_for(name: str) -> str:
 
 
 class Client:
-    def __init__(self, port: int, credential: str | None, timeout_s: float = 120, before=None):
+    def __init__(self, port: int, credential: str | None, timeout_s: float = 120, before=None, outlast: bool = False):
         """credential: an agent's token, or for the owner's commands the pairing key. None: before, if given, is
-        called to set it or raise; else the client calls only what needs no credential (post_open)."""
+        called to set it or raise; else the client calls only what needs no credential (post_open). outlast: a
+        listener's, which waits on the owner anyway: an unreachable service is waited out however long it takes,
+        said on stderr when it goes and when it is back."""
         self.base = f"http://127.0.0.1:{port}"
         self.credential = credential
         self.timeout_s = timeout_s
         self.before = before
+        self.outlast = outlast
         self.version: str | None = None  # the service's, from its last response
 
     def get(self, path: str, **query):
@@ -67,6 +73,23 @@ class Client:
         if credential:
             headers["Authorization"] = f"Bearer {self.credential}"
         req = urllib.request.Request(f"{self.base}{path}", data=data, headers=headers)
+        down = False
+        while True:
+            try:
+                out = self._open(req)
+            except NanoteaError as err:
+                if err.status is not None or not self.outlast:
+                    raise
+                if not down:
+                    print(f"nanotea: {err}; waiting until it is back", file=sys.stderr, flush=True)
+                    down = True
+                time.sleep(OUTLAST_POLL_S)
+                continue
+            if down:
+                print(f"nanotea: service back at {self.base}", file=sys.stderr, flush=True)
+            return out
+
+    def _open(self, req: urllib.request.Request):
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
                 self.version = r.headers.get(HEADER)

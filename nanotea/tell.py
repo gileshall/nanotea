@@ -19,6 +19,7 @@ from nanotea.bang import OWNER_ONLY_NOTE, Host
 from nanotea.client import Client, NanoteaError
 from nanotea.config import load_config
 from nanotea.credentials import obtain
+from nanotea.mailbox import starter, starter_gone
 
 _cfg = load_config()
 OWNER, PORT = _cfg["app"]["owner"], _cfg["port"]
@@ -28,8 +29,9 @@ TOKEN: str | None = None  # set by main: the token this run presents
 SERVICE: dict[str, str | None] = {"version": None}  # from the service's last response
 
 
-def request(url: str, body: dict | None = None, patient: bool = False):
-    """patient: ride out a service restart for up to RESTART_GRACE_S, then fail."""
+def request(url: str, body: dict | None = None, patient: bool = False, outlast: bool = False):
+    """patient: ride out a service restart for up to RESTART_GRACE_S, then fail. outlast: a listener's, which waits
+    on the owner anyway: ride it out however long it takes."""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json",
                                                           "Authorization": f"Bearer {TOKEN}"})
@@ -38,18 +40,22 @@ def request(url: str, body: dict | None = None, patient: bool = False):
         try:
             with urllib.request.urlopen(req, timeout=120) as r:
                 SERVICE["version"] = r.headers.get(version.HEADER)
-                return json.load(r)
+                out = json.load(r)
+            if deadline is not None:
+                print("nanotea-tell: service back", file=sys.stderr, flush=True)
+            return out
         except urllib.error.HTTPError as e:
             sys.exit(f"nanotea-tell: {json.loads(e.read()).get('error', e.reason)}")
-        except (urllib.error.URLError, ConnectionError) as e:
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             reason = getattr(e, "reason", e)
-            if not patient:
+            if not (patient or outlast):
                 sys.exit(f"nanotea-tell: service not reachable at {url}: {reason}")
             if deadline is None:
                 deadline = time.monotonic() + RESTART_GRACE_S
-                print(f"nanotea-tell: service unreachable ({reason}); retrying for {RESTART_GRACE_S}s",
-                      file=sys.stderr)
-            if time.monotonic() > deadline:
+                print(f"nanotea-tell: service unreachable ({reason}); " +
+                      ("waiting until it is back" if outlast else f"retrying for {RESTART_GRACE_S}s"),
+                      file=sys.stderr, flush=True)
+            if not outlast and time.monotonic() > deadline:
                 sys.exit(f"nanotea-tell: service not reachable at {url} for {RESTART_GRACE_S}s: {reason}")
             time.sleep(3)
 
@@ -80,10 +86,11 @@ def wait_reply(base: str, msg_id: str) -> None:
     """Until the answer comes, or the owner writes in the asker's line: that ends the wait too, with the question
     still open, so a message typed rather than sent as the answer isn't left for nobody."""
     noted = False
+    parent = starter()
     while True:
-        msg = request(f"{base}/api/messages/{msg_id}", patient=True)
+        msg = request(f"{base}/api/messages/{msg_id}", outlast=True)
         reply = msg["reply"]
-        if reply is None and msg["line"] is not None and wrote_meanwhile(base, msg):
+        if reply is None and msg["line"] is not None and wrote_meanwhile(base, msg, parent):
             return
         if reply is None and version.stale(SERVICE["version"]):
             again(["--from", msg["sender"], "--wait-reply", msg_id])
@@ -91,13 +98,14 @@ def wait_reply(base: str, msg_id: str) -> None:
             sys.exit(f"nanotea-tell: delivery failed: {msg['error']}")
         if reply is None and msg["set_aside"]:
             request(f"{base}/api/agents/{urllib.parse.quote(msg['sender'], safe='')}/answers/delivered",
-                    {"ids": [f"aside-{msg_id}"], "listener": taker("--ask")}, patient=True)
+                    {"ids": [f"aside-{msg_id}"], "listener": taker("--ask")}, outlast=True)
             sys.exit(f"nanotea-tell: {OWNER} set this question aside without answering it; ask again if you still "
                      "need the answer")
         if reply is not None and reply["transcript_status"] == "pending" and not noted:
             print(f"nanotea-tell: {OWNER} replied by voice; waiting for the transcript", file=sys.stderr)
             noted = True
         if reply is not None and reply["transcript_status"] != "pending":
+            orphaned(parent)
             if reply["text"]:
                 print(reply["text"])
             if reply.get("tap"):
@@ -115,7 +123,7 @@ def wait_reply(base: str, msg_id: str) -> None:
                 for t in reply.get("takes", []):
                     print(take_line(f"{msg['dir']}/{t['stored'] or reply['audio']}", t))
             request(f"{base}/api/agents/{urllib.parse.quote(msg['sender'], safe='')}/answers/delivered",
-                    {"ids": [msg_id], "listener": taker("--ask")}, patient=True)
+                    {"ids": [msg_id], "listener": taker("--ask")}, outlast=True)
             return
         time.sleep(3)
 
@@ -125,16 +133,17 @@ def taker(how: str) -> str:
     return f"nanotea-tell {how}, pid {os.getpid()} of {os.getppid()}, in {Path.cwd().name[:20]}"
 
 
-def wrote_meanwhile(base: str, msg: dict) -> bool:
+def wrote_meanwhile(base: str, msg: dict, parent: int) -> bool:
     """Takes and prints what the owner wrote in the line of msg's sender, if anything."""
     sender = msg["sender"]
     api = f"{base}/api/{inbox_segment(msg['line'])}"
-    pending = request(f"{api}/pending?{urllib.parse.urlencode({'name': sender})}", patient=True)
+    pending = request(f"{api}/pending?{urllib.parse.urlencode({'name': sender})}", outlast=True)
     if not pending or all(m.get("bang") for m in pending):
         return False
+    orphaned(parent)
     print_inbox(pending)
     request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending],
-                                 "listener": taker("--ask")})
+                                 "listener": taker("--ask")}, outlast=True)
     print(f"[{OWNER} wrote in your line while you waited. Your question {msg['id']} is still open; to wait for its "
           f"answer: nanotea-tell --from {json.dumps(sender)} --wait-reply {msg['id']}]")
     return True
@@ -264,7 +273,7 @@ def listen(base: str, sender: str, about: str | None, box: str | None, channels:
             again(sys.argv[1:])
         return
     session = secrets.token_hex(8)
-    client = Client(PORT, TOKEN)
+    client = Client(PORT, TOKEN, outlast=True)
 
     def register() -> None:
         client.post("/api/sessions", {"name": sender, "session": session, "pid": os.getpid(), "line": box,
@@ -298,47 +307,65 @@ def again(args: list[str]) -> None:
     os.execv(sys.executable, [sys.executable, "-m", "nanotea.tell", *args])
 
 
-def _listen(base: str, sender: str, about: str | None, box: str | None, channels: list[str], idle: bool) -> bool:
-    """Whether the service was upgraded: False once a batch is printed."""
+def _listen(base: str, sender: str, about: str | None, box: str | None, channels: list[str], idle: bool,
+            once: bool = False) -> bool:
+    """Whether the service was upgraded: False once a batch is printed. once: --check, which never waits."""
     query = urllib.parse.urlencode({"name": sender})
     inbox_query = urllib.parse.urlencode({"name": sender, **({"idle": 1} if idle else {})})
     api = f"{base}/api/{inbox_segment(box)}" if box else None
+    parent = starter()
     if api:
-        info = request(api, {"name": sender, "about": about, "open": True})
-        print(f"nanotea-tell: {sender} holds {OWNER}'s {box} inbox as listener pid {os.getpid()}; "
-              f"they write at {info['url']}", file=sys.stderr)
+        info = request(api, {"name": sender, "about": about, "open": True}, outlast=True)
+        if not once:
+            print(f"nanotea-tell: {sender} holds {OWNER}'s {box} inbox as listener pid {os.getpid()}; "
+                  f"they write at {info['url']}", file=sys.stderr)
     for channel in channels:
-        info = request(f"{base}/api/channels/{channel}")
-        print(f"nanotea-tell: {sender} listens to #{channel} as listener pid {os.getpid()}; {info['url']}",
+        info = request(f"{base}/api/channels/{channel}", outlast=True)
+        if not once:
+            print(f"nanotea-tell: {sender} listens to #{channel} as listener pid {os.getpid()}; {info['url']}",
+                  file=sys.stderr)
+    if not once:
+        print(f"nanotea-tell: set a status {OWNER} sees: nanotea-tell --from {json.dumps(sender)} --status \"...\"",
               file=sys.stderr)
-    print(f"nanotea-tell: set a status {OWNER} sees: nanotea-tell --from {json.dumps(sender)} --status \"...\"",
-          file=sys.stderr)
-    where = f"--inbox {box}" if box else f"--channel {channels[0]}"
-    print(f"nanotea-tell: show {OWNER} you're typing before a long write: nanotea-tell --from {json.dumps(sender)} "
-          f"--typing {where}", file=sys.stderr)
-    listener = taker("--listen")
+        where = f"--inbox {box}" if box else f"--channel {channels[0]}"
+        print(f"nanotea-tell: show {OWNER} you're typing before a long write: nanotea-tell --from "
+              f"{json.dumps(sender)} --typing {where}", file=sys.stderr)
+    listener = taker("--check" if once else "--listen")
     while True:
         got = False
         if api:
-            pending = request(f"{api}/pending?{inbox_query}", patient=True)
+            pending = request(f"{api}/pending?{inbox_query}", outlast=True)
             if pending and all(m.get("bang") for m in pending):
                 pending = []  # results of commands wait for something that is for the agent
             if pending:
+                orphaned(parent)
                 print_inbox(pending)
-                request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener})
+                request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener},
+                        outlast=True)
                 got = True
         for channel in channels:
             ch = f"{base}/api/channels/{channel}"
-            pending = request(f"{ch}/pending?{query}", patient=True)
+            pending = request(f"{ch}/pending?{query}", outlast=True)
             if pending:
+                orphaned(parent)
                 print_channel(channel, pending)
-                request(f"{ch}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener})
+                request(f"{ch}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener},
+                        outlast=True)
                 got = True
         if got:
+            return False
+        if once:
+            print("nanotea-tell: nothing new", file=sys.stderr)
             return False
         if version.stale(SERVICE["version"]):
             return True
         time.sleep(3)
+
+
+def orphaned(parent: int) -> None:
+    """Stop before taking anything once whoever started this listener is gone."""
+    if why := starter_gone(parent):
+        sys.exit(f"nanotea-tell: {why}")
 
 
 def set_status(base: str, sender: str, text: str) -> None:
@@ -499,6 +526,10 @@ def main() -> None:
                       help=f"wait for {OWNER}'s messages in an inbox you hold (--inbox) and new posts in channels "
                            "(--channel); prints them and exits, so run it in the background and again after each "
                            "batch. With neither, holds the main inbox")
+    mode.add_argument("--check", action="store_true",
+                      help=f"take what is new for you now, as --listen would, print it and exit without waiting: "
+                           f"{OWNER}'s messages in your inbox (--inbox) and new posts in channels (--channel). "
+                           "\"nothing new\" on stderr if there is none")
     mode.add_argument("--close-inbox", action="store_true", help="inbox holder only: release the inbox")
     mode.add_argument("--react", nargs=2, metavar=("ID", "EMOJI"),
                       help=f"react to {OWNER}'s message ID (from --listen) with an emoji: in your inbox, or with "
@@ -562,21 +593,21 @@ def main() -> None:
             p.error(f"--control is not JSON: {err}")
     elif a.choice:
         control = {"type": "choice", "options": a.choice}
-    if len(a.channel) > 1 and not a.listen:
-        p.error("more than one --channel only goes with --listen")
+    if len(a.channel) > 1 and not (a.listen or a.check):
+        p.error("more than one --channel only goes with --listen or --check")
     if a.typing and (a.text is not None or a.attach or a.title or a.voice or a.status is not None
                      or (a.channel and a.inbox)):
         p.error("--typing goes alone, with --inbox or one --channel")
     if a.channel and (a.close_inbox or a.history is not None or a.event or a.voices or a.channels or a.wait_reply):
-        p.error("--channel goes with sending, --listen, or --react")
-    if a.channel and a.inbox and not a.listen:
-        p.error("--inbox and --channel together only go with --listen")
+        p.error("--channel goes with sending, --listen, --check, or --react")
+    if a.channel and a.inbox and not (a.listen or a.check):
+        p.error("--inbox and --channel together only go with --listen or --check")
     listen_box = a.inbox or (None if a.channel else "main")
     if a.about is not None and a.listen and not listen_box:
         p.error("--about goes with --listen on an inbox; channels have no --about")
     if a.status is not None and (a.text is not None or a.attach or a.title or a.voice or a.ask or a.wait
-                                 or a.wait_reply or a.voices or a.close_inbox or a.react or a.history is not None
-                                 or a.channels or a.event or (a.channel and not a.listen)):
+                                 or a.wait_reply or a.voices or a.close_inbox or a.check or a.react
+                                 or a.history is not None or a.channels or a.event or (a.channel and not a.listen)):
         p.error("--status goes alone or with --listen")
     if a.stale is not None and not a.board:
         p.error("--stale goes with --board")
@@ -620,6 +651,9 @@ def main() -> None:
         return arrange(base, a.sender, a.arrange)
     if a.listen:
         return listen(base, a.sender, a.about, listen_box, a.channel, a.idle, a.bang)
+    if a.check:
+        _listen(base, a.sender, None, listen_box, a.channel, False, once=True)
+        return
     if a.typing:
         where = f"channels/{a.channel[0]}" if a.channel else inbox_segment(a.inbox)
         out = request(f"{base}/api/{where}/typing", {"name": a.sender})

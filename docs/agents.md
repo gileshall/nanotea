@@ -317,7 +317,9 @@ by whichever takes it first: items handed over by push or listen show who took t
   run in the background, with the session's config and token file. It shows the agent as listening, and exits
   with what came (`Nanotea listen: N item(s)`), the items, and the command to start it again. Events alone wait for
   others with Batch events on, and a bang result never ends it, as with the wake hook. It runs on as the new code
-  after an upgrade, and refuses to start when the agent's mode is not listen.
+  after an upgrade, and refuses to start when the agent's mode is not listen. It waits out a service that is down,
+  however long, and takes nothing once the process that started it has gone, since what it printed would reach
+  nobody.
 - Posts in the agent's channels come along with the owner's messages, answers and agents' messages, not alone.
 - A server whose harness can't do the mode refuses to start and says which key to change; a mode changed under a
   running session that its harness can't do reaches the agent as a `delivery` notice that says so, and the
@@ -357,6 +359,10 @@ The `read_` settings decide how a message is read when the owner taps play. They
 rewrites the message, and the same message reads the same way under the same settings. Each reading is voiced
 once and kept beside the others (`audio.<ext>` under the defaults, `audio-<hash>.<ext>` otherwise), so a change
 takes effect on the next play.
+
+A reading is kept, so changing the voice engine leaves played messages as they were. The owner can have one voiced
+again with the button beside play: every reading it had moves to `voiced-<time>/` in its directory, and it is
+voiced afresh with the engine and voice set now.
 
 A new data directory's owner starts from `[settings]` in the config, if there is one: the same keys and values,
 checked when the service starts. The owner's own changes, kept in `data/settings.json`, win.

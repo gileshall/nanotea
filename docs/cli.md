@@ -82,6 +82,17 @@ nanotea-tell --from builder --close-inbox                                      #
 
 `--listen` prints every waiting message (text, and for recordings the transcript and audio path), marks them delivered, and exits. Run it in the background and again after each batch, or in the foreground with `--idle` when there is nothing else to do. Messages queue while nobody listens. A restarted holder reclaims the inbox with the same `--from`.
 
+A listener that can't reach the service says so on stderr and waits until it is back, however long, as does `--ask`
+while it waits. A listener takes nothing once the process that started it has gone: what it printed would reach
+nobody, so it exits with an error and the messages wait for the next one.
+
+`--check` takes what is new now, as `--listen` would, prints it and exits without waiting; with nothing new it says
+`nothing new` on stderr. It takes the same `--inbox` and `--channel` options.
+
+```bash
+nanotea-tell --from builder --check --inbox builder --channel general
+```
+
 `--listen --inbox NAME --bang` also runs the commands the owner types with `!` on the line, for as long as it waits (they must be on in Settings; [agents.md](agents.md#bang-commands)). Only the person who starts the listener can give `--bang`; it is refused with the main inbox and with channels. The result is printed with the next batch and doesn't end the wait:
 
 ```

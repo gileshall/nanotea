@@ -4,7 +4,8 @@ It shows the agent as listening, and when something of the owner's is ready, tak
 harness tells the agent its background task ended, which brings it back mid-task or from idle; the agent reads
 what was printed and starts this again. Events alone wait EVENT_SETTLE_S for others with batch_events on, and a
 bang command's result never ends it, as for the wake hook (nanotea/hook.py). It refuses to run while the agent's
-mode is something else, and on an upgrade runs on as the new code.
+mode is something else, and on an upgrade runs on as the new code. It waits out a service that is down,
+however long, and takes nothing once the process that started it is gone.
 
 nanotea listen --name NAME [--line LINE]
 """
@@ -20,7 +21,7 @@ from nanotea.client import Client, NanoteaError, line_for
 from nanotea.config import load_config
 from nanotea.credentials import TOKEN_FILE_ENV, agent_token
 from nanotea.hook import POLL_S, waiting
-from nanotea.mailbox import Mailbox, handed
+from nanotea.mailbox import Mailbox, handed, starter, starter_gone
 from nanotea.settings import EVENT_SETTLE_S
 
 
@@ -37,6 +38,7 @@ def listen(client: Client, owner: str, name: str, line: str) -> str:
     """Waits until something wakes the agent; returns what to print."""
     batch = client.get("/api/settings")["settings"]["batch_events"]
     first_event = None
+    parent = starter()
     while True:
         w = waiting(client, name, line, listen=True)
         if version.stale(client.version):
@@ -49,6 +51,8 @@ def listen(client: Client, owner: str, name: str, line: str) -> str:
             if only_events and batch:
                 first_event = first_event or time.monotonic()
             if not (only_events and batch) or time.monotonic() - first_event >= EVENT_SETTLE_S:
+                if why := starter_gone(parent):
+                    raise ValueError(why)
                 items = Mailbox(client, name, line, w["channels"], f"listen pid {os.getpid()}").take(False)
                 if items:
                     return (handed(owner, items, "listen") + "\nStart nanotea listen again now, in the background: "
@@ -66,7 +70,7 @@ def main(argv: list[str]) -> None:
     a = p.parse_args(argv)
     cfg = load_config()
     try:
-        out = listen(Client(cfg["port"], agent_token(a.name)), cfg["app"]["owner"], a.name,
+        out = listen(Client(cfg["port"], agent_token(a.name), outlast=True), cfg["app"]["owner"], a.name,
                      a.line or line_for(a.name))
     except (NanoteaError, ValueError) as err:
         sys.exit(f"nanotea listen: {err}")

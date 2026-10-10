@@ -6,7 +6,9 @@ import http.client
 import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -496,6 +498,29 @@ class Service(Tokens, unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertIn("<p>    x = 1\n<strong>bold</strong></p>", self.call("GET", "/c/general")[1])
 
+    def test_voice_it_again(self):
+        msg_id = re.search(r"/m/([^/?#\s]+)", self.tell("--from", "builder", "--voice", "v1", "Say it twice"))[1]
+        self.wait_for(lambda: json.loads(self.local("GET", f"/api/messages/{msg_id}")[1])["status"] == "done",
+                      "the message")
+        self.assertIn(f'data-speak="{msg_id}"', self.call("GET", f"/m/{msg_id}")[1])
+        self.assertEqual(self.call("GET", f"/audio/{msg_id}")[0], 200)
+        page = self.call("GET", f"/m/{msg_id}")[1]
+        self.assertIn(f'data-revoice="{msg_id}"', page)
+        self.assertNotIn(f'data-speak="{msg_id}"', page)
+        before = json.loads(self.local("GET", f"/api/messages/{msg_id}")[1])
+        first = Path(before["dir"], before["audio"]).read_bytes()
+        status, out = self.local("POST", f"/api/messages/{msg_id}/revoice", {}, as_="builder")
+        self.assertEqual(status, 403, out)  # the owner's alone
+        status, out = self.call("POST", f"/api/messages/{msg_id}/revoice", {})
+        self.assertEqual(status, 200, out)
+        after = json.loads(self.local("GET", f"/api/messages/{msg_id}")[1])
+        self.assertEqual(json.loads(out)["audio"], f"/audio/{msg_id}?v={after['audio']}")
+        self.assertEqual(Path(after["dir"], after["audio"]).read_bytes(), b"fake audio for Say it twice")
+        aside = list(Path(after["dir"]).glob("voiced-*"))
+        self.assertEqual(len(aside), 1)
+        self.assertEqual((aside[0] / before["audio"]).read_bytes(), first)  # the earlier voicing, kept
+        self.assertEqual(self.call("GET", json.loads(out)["audio"])[0], 200)
+
     def upload(self, path, name, ctype, raw, length=None):
         """The owner attaches a file: raw bytes, as the page sends them. length: claim another size, sending none."""
         conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
@@ -786,6 +811,41 @@ class Service(Tokens, unittest.TestCase):
         self.assertEqual(json.loads(body)["by"], "Robin")
         self.assertIn("#ops", self.tell("--channels"))
         self.assertIn("#general", self.tell("--channels"))
+
+    def test_check_and_an_orphaned_listener(self):
+        def check():
+            return subprocess.run([sys.executable, "-m", "nanotea.tell", "--from", "Ola", "--check", "--inbox", "ola"],
+                                  env=self.env, capture_output=True, text=True, timeout=30)
+
+        r = check()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("nothing new", r.stderr)
+        # A listener whose starter exits: the shell holds it until it has the inbox, then goes.
+        log = Path(self.tmp.name, "orphan.log")
+        log.touch()
+        listener = [sys.executable, "-m", "nanotea.tell", "--from", "Ola", "--listen", "--inbox", "ola"]
+        shell = subprocess.Popen(["sh", "-c", f'{shlex.join(listener)} >"{log}" 2>&1 & echo $!; read _'],
+                                 env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        orphan = int(shell.stdout.readline())
+        self.addCleanup(self.kill, orphan)
+        self.wait_for(lambda: "holds" in log.read_text(), "the listener to hold the inbox")
+        shell.communicate("\n", timeout=10)
+        self.assertEqual(self.call("POST", "/api/dm-ola/messages", {"text": "for whoever reads"})[0], 200)
+        self.wait_for(lambda: "it took nothing and stops" in log.read_text(), "the orphan to stop")
+        self.assertNotIn("for whoever reads", log.read_text())
+        r = check()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("for whoever reads", r.stdout)
+        self.assertNotIn("nothing new", r.stderr)
+        self.assertIn("nothing new", check().stderr)
+
+    @staticmethod
+    def kill(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
     # Settings are the service's, shared by every test: each test that changes them puts them back.
     def settings(self, **patch):

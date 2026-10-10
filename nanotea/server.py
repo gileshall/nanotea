@@ -101,7 +101,7 @@ def box_of_segment(seg: str) -> str | None:
 
 # What only the owner's key does: acting as the owner, changing settings, rules and tokens. Every other POST is
 # the agents' API, which needs a token.
-OWNER_POSTS = re.compile(rf"/api/messages/{M}/(drafts|files|reply|delete|heard|react|act)"
+OWNER_POSTS = re.compile(rf"/api/messages/{M}/(drafts|files|reply|delete|heard|react|act|revoice)"
                          rf"|/api/({SEGS})/(drafts|files|messages)|/api/push/subscribe"
                          rf"|/api/channels|/api/channels/{NAME}/(drafts|files|messages)"
                          rf"|/api/settings|/api/prompts|/api/rules|/api/rules/[0-9a-f]+/delete"
@@ -2026,6 +2026,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._save_draft(body, partial(store.new_draft, i))
         if i := self._msg(rf"/api/messages/({M})/reply", path):
             return self._reply(i, body)
+        if i := self._msg(rf"/api/messages/({M})/revoice", path):
+            try:
+                name = self.app.worker.revoice(i)
+            except (ValueError, RuntimeError) as err:
+                log.exception("voicing %s again failed", i)
+                return self._json(502, {"error": f"couldn't voice it again: {err}"})
+            log.info("the owner had %s voiced again", i)
+            return self._json(200, {"audio": f"/audio/{i}?v={name}"})
         if i := self._msg(rf"/api/messages/({M})/delete", path):
             self.app.store.delete(i)
             log.info("the owner deleted %s", i)

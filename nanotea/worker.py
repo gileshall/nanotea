@@ -3,6 +3,7 @@ Escalator: iMessage about messages that went too long without a response."""
 
 import logging
 import queue
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -17,6 +18,7 @@ from nanotea.store import AUDIO_MARKER, SHOWN, Message, Store, media_kind, now_i
 log = logging.getLogger(__name__)
 
 CLIP_GAP_S = 0.5
+VOICED = re.compile(r"audio(-[0-9a-f]{10})?\.[a-z0-9]+")  # speech.stem's names
 ESCALATION_CHECK_S = 60
 
 
@@ -112,8 +114,8 @@ class Worker(_Queue):
 
     def speak(self, msg_id: str) -> str:
         """Voice a finished message on request, read as the owner's reading settings say. Each reading is voiced
-        once and kept; a message is voiced again only under a reading it hasn't been. Returns its audio file
-        name."""
+        once and kept; a message is voiced again only under a reading it hasn't been, or by revoice. Returns its
+        audio file name."""
         with self._speak_lock:
             msg = self.store.load(msg_id)
             read = speech.reading(self.settings())
@@ -129,6 +131,25 @@ class Worker(_Queue):
             self.store.save(msg)
             log.info("voiced %s on request%s", msg.id, " (kept from before)" if kept else "")
             return msg.audio
+
+    def revoice(self, msg_id: str) -> str:
+        """Voice a message again, on the engine and voice configured now: one voiced before an engine changed
+        keeps the old engine's voicing until this. Its voicings, under every reading, move to voiced-<time>/.
+        Returns the new audio file name."""
+        with self._speak_lock:
+            msg = self.store.load(msg_id)
+            if msg.status != "done":
+                raise ValueError(f"message {msg_id} is {msg.status}, not ready to voice")
+            old = [p for p in self.store.path(msg.id).iterdir() if VOICED.fullmatch(p.name) or p.name == "parts"]
+            if old:
+                aside = self.store.path(msg.id, f"voiced-{datetime.now():%Y%m%d-%H%M%S-%f}")
+                aside.mkdir()
+                for p in old:
+                    p.rename(aside / p.name)
+                log.info("voicings of %s set aside in %s to voice it again", msg.id, aside.name)
+            msg.audio = None
+            self.store.save(msg)
+        return self.speak(msg_id)
 
     def _speak(self, msg: Message, script: str, stem: str) -> str:
         """Synthesize the script, splicing in clips at their markers, as stem.<ext>. Returns the file's name."""
