@@ -521,6 +521,22 @@ class Service(Tokens, unittest.TestCase):
         self.assertEqual(len(aside), 1)
         self.assertEqual((aside[0] / before["audio"]).read_bytes(), first)  # the earlier voicing, kept
         self.assertEqual(self.call("GET", json.loads(out)["audio"])[0], 200)
+        # Voiced on the sender's voice now; one the engine doesn't have fails before anything is set aside.
+        book = Path(after["dir"]).parent / "voices.json"
+        kept = book.read_text()
+        taken = {v["id"] for v in json.loads(self.local("GET", "/api/voices", as_="builder")[1]) if v["taken_by"]}
+        free = sorted({f"v{i}" for i in range(1, 9)} - taken)[0]
+        try:
+            book.write_text(json.dumps({**json.loads(kept), "builder": "Karen"}))
+            status, out = self.call("POST", f"/api/messages/{msg_id}/revoice", {})
+            self.assertEqual(status, 502, out)
+            self.assertIn("builder's voice 'Karen' is not one the voice engine has", json.loads(out)["error"])
+            self.assertEqual(len(list(Path(after["dir"]).glob("voiced-*"))), 1)
+            book.write_text(json.dumps({**json.loads(kept), "builder": free}))
+            self.assertEqual(self.call("POST", f"/api/messages/{msg_id}/revoice", {})[0], 200)
+            self.assertEqual(json.loads(self.local("GET", f"/api/messages/{msg_id}")[1])["voice"], free)
+        finally:
+            book.write_text(kept)
 
     def upload(self, path, name, ctype, raw, length=None):
         """The owner attaches a file: raw bytes, as the page sends them. length: claim another size, sending none."""

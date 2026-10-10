@@ -80,7 +80,7 @@ backend = "command"
 
 # The Speechify API. Only voices that support the model are offered. Needs SPEECHIFY_API_KEY in env_file.
 [tts.speechify]
-model = "simba-3.2"       # required
+model = "simba-3.2"       # required: a model, not a voice; each agent picks its own voice
 timeout_s = 180           # required: seconds before a request fails
 
 # The Kokoro model in the service: uv sync --extra kokoro, then nanotea kokoro download. Every key optional.

@@ -33,7 +33,8 @@ class Speechify:
     ext = "mp3"
     SECRETS = ("SPEECHIFY_API_KEY",)
     OPTIONS = (
-        Option("model", str, "The Speechify model. Only voices that support it are offered, such as simba-3.2."),
+        Option("model", str, "The Speechify model, such as simba-3.2; not a voice. Only voices that support it are "
+                            "offered, and each agent picks its own (nanotea-tell --voices)."),
         Option("timeout_s", int, "Seconds to wait for Speechify before a request fails."),
     )
 

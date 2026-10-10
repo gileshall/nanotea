@@ -364,6 +364,12 @@ A reading is kept, so changing the voice engine leaves played messages as they w
 again with the button beside play: every reading it had moves to `voiced-<time>/` in its directory, and it is
 voiced afresh with the engine and voice set now.
 
+A message is voiced in its sender's voice at the time it is played, not the voice it was sent with, so an agent
+that picks a new voice is heard in it on its older messages too. After the engine changes, an agent whose voice
+the new engine doesn't have can't be voiced until it picks one (`nanotea-tell --voices`, then `--voice ID`); playing
+says so, and voicing again checks before it sets anything aside. A config change to `[tts]` from the app lists the
+engine's voices before it saves, so a model that no voice supports is refused there.
+
 A new data directory's owner starts from `[settings]` in the config, if there is one: the same keys and values,
 checked when the service starts. The owner's own changes, kept in `data/settings.json`, win.
 

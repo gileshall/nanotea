@@ -49,11 +49,14 @@ class _Queue:
 
 class Worker(_Queue):
     def __init__(self, store: Store, rewriter, tts, notifiers: list, note_for: Callable[[Message], Note],
-                 who: Callable[[str], str], mix: audio.Mix, hush: HushBook, settings: Callable[[], dict]):
-        """who(sender): "Name (sender)", the speaker the rewrite writes as. mix: how speech and clips are joined.
+                 who: Callable[[str], str], mix: audio.Mix, hush: HushBook, settings: Callable[[], dict],
+                 voice_of: Callable[[str], str | None]):
+        """who(sender): "Name (sender)", the speaker the rewrite writes as. voice_of(sender): its voice now, which
+        voices its messages when played. mix: how speech and clips are joined.
         hush: whether the owner wants a notification for this message now. settings: the owner's settings now,
         for reading aloud."""
         self.store = store
+        self.voice_of = voice_of
         self.settings = settings
         self.hush = hush
         self.mix = mix
@@ -140,6 +143,7 @@ class Worker(_Queue):
             msg = self.store.load(msg_id)
             if msg.status != "done":
                 raise ValueError(f"message {msg_id} is {msg.status}, not ready to voice")
+            self._voice(msg.sender)  # before its voicings are set aside
             old = [p for p in self.store.path(msg.id).iterdir() if VOICED.fullmatch(p.name) or p.name == "parts"]
             if old:
                 aside = self.store.path(msg.id, f"voiced-{datetime.now():%Y%m%d-%H%M%S-%f}")
@@ -151,8 +155,18 @@ class Worker(_Queue):
             self.store.save(msg)
         return self.speak(msg_id)
 
+    def _voice(self, sender: str) -> str:
+        """The sender's voice now, if the voice engine has it."""
+        voice = self.voice_of(sender)
+        if voice not in {v["id"] for v in self.tts.voices()}:
+            raise ValueError(f"{sender}'s voice {voice!r} is not one the voice engine has. {sender} picks one: "
+                             "nanotea-tell --voices, then send with --voice ID")
+        return voice
+
     def _speak(self, msg: Message, script: str, stem: str) -> str:
-        """Synthesize the script, splicing in clips at their markers, as stem.<ext>. Returns the file's name."""
+        """Synthesize the script in the sender's voice now, splicing in clips at their markers, as stem.<ext>.
+        Returns the file's name."""
+        msg.voice = self._voice(msg.sender)
         if not AUDIO_MARKER.search(script):
             name = f"{stem}.{self.tts.ext}"
             self.tts.synthesize(script, self.store.path(msg.id, name), msg.voice)

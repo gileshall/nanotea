@@ -308,9 +308,10 @@ HOST_ONLY = ("bang", "config_programs")  # switches only the host key turns on, 
 
 # Checking, as the service would start
 
-def check_all(raw: dict, env: dict) -> None:
+def check_all(raw: dict, env: dict, voices: bool = False) -> None:
     """Everything the service checks of its config before it listens, without starting it. Raises what it would
-    stop with."""
+    stop with. voices: list the voice engine's voices as well, which asks a remote engine; done when [tts] changes,
+    as a model or voice set it doesn't have fails only when a message is voiced."""
     from nanotea import audio, bang, delivery, plugins, settings
     from nanotea.board import BoardError, check_groups
     from nanotea.config import ConfigError, check, resolve
@@ -335,14 +336,16 @@ def check_all(raw: dict, env: dict) -> None:
     plugins.add_path(cfg.get("plugin_path", []))
     ctx = {"env": env, "owner": cfg["app"]["owner"], "app_name": cfg["app"]["name"], "data": data,
            "services": {"push": PushBook(data, cfg["notify"].get("push", {}).get("subject"))}}
-    plugins.build_all(cfg, ctx)
+    built = plugins.build_all(cfg, ctx)
+    if voices:
+        built["tts"].voices()
 
 
-def verify(text: str, env: dict | None) -> str | None:
+def verify(text: str, env: dict | None, voices: bool = False) -> str | None:
     """Checks text as a config in another process: None if the service would start with it, or what it would say.
-    env: the secrets to check with; None reads the env_file it names."""
+    env: the secrets to check with; None reads the env_file it names. voices: as check_all."""
     r = subprocess.run([sys.executable, "-m", "nanotea", "config", "check", "-"],
-                       input=json.dumps({"toml": text, "env": env}), capture_output=True, text=True,
+                       input=json.dumps({"toml": text, "env": env, "voices": voices}), capture_output=True, text=True,
                        timeout=CHECK_TIMEOUT_S)
     if r.returncode == 0:
         return None
@@ -431,11 +434,11 @@ def main(argv: list[str]) -> None:
     if a.cmd == "check":
         if a.file == "-":
             got = json.load(sys.stdin)
-            text, env, path = got["toml"], got["env"], CONFIG
+            text, env, path, voices = got["toml"], got["env"], CONFIG, got["voices"]
         else:
             path = Path(a.file).expanduser() if a.file else CONFIG
             try:
-                text, env = path.read_text(), None
+                text, env, voices = path.read_text(), None, False
             except OSError as err:
                 sys.exit(f"nanotea config check: {err}")
         try:
@@ -445,7 +448,7 @@ def main(argv: list[str]) -> None:
                 raise ConfigError(f"{path} is not TOML: {err}") from err
             if env is None:
                 env = load_env_file(raw.get("env_file"))
-            check_all(raw, env)
+            check_all(raw, env, voices)
         except Exception as err:  # what the service would stop with, said as it would say it
             print(str(err) if isinstance(err, (ConfigError, ValueError)) else f"{type(err).__name__}: {err}")
             sys.exit(1)

@@ -193,7 +193,11 @@ class Service(Case):
                               ([{"table": ["tts", "command"], "key": "nope", "value": 1}], "nope"),
                               ([{"table": ["delivery"], "key": "agents", "value": {"desk": "shout"}}],
                                "'desk' has mode 'shout'"),
-                              ([{"table": [], "key": "public_url", "value": "https://x.test/path"}], "public_url")):
+                              ([{"table": [], "key": "public_url", "value": "https://x.test/path"}], "public_url"),
+                              # a voice engine whose voices can't be listed: the save asks it, as playing would
+                              ([{"table": ["tts"], "key": "backend", "value": "kokoro-server"},
+                                {"table": ["tts", "kokoro-server"], "key": "url", "value": "http://127.0.0.1:9"}],
+                               "127.0.0.1:9")):
             with self.subTest(changes=changes):
                 status, out = self.save(changes)
                 self.assertEqual(status, 400, out)

@@ -397,7 +397,8 @@ class App:
         self.hush = HushBook(self.store.root)
         self.rewriter = built["rewrite"]
         self.worker = Worker(self.store, self.rewriter, self.tts, self.notify_now,
-                             self.note_for, pages.who, self.mix, self.hush, lambda: self.settings.get())
+                             self.note_for, pages.who, self.mix, self.hush, lambda: self.settings.get(),
+                             self.voices.voice_of)
         # An empty escalate list turns escalation off.
         self.escalator = (Escalator(self.store, built["notify_escalate"],
                                     ncfg["escalate_after_min"], self.note_for, self.hush) if ncfg["escalate"] else None)
@@ -2674,7 +2675,7 @@ class Handler(BaseHTTPRequestHandler):
                                                      "this app only while Programs from this app is on. Turn it on "
                                                      "on the machine nanotea runs on: nanotea config programs on. "
                                                      f"Or change it in {path}."})
-                if error := configedit.verify(new, None):
+                if error := configedit.verify(new, None, voices=before.get("tts") != after.get("tts")):
                     return self._json(400, {"error": configview.scrub(error, app.secret_values)})
                 if (before.get("host"), before.get("port")) != (after.get("host"), after.get("port")):
                     _can_listen(after.get("host", "127.0.0.1"), after.get("port", 7447),
