@@ -53,11 +53,12 @@ class Speechify:
     def voices(self) -> list[dict]:
         """Voices that support the configured model. Fetched once per process."""
         if self._voices is None:
-            found, cursor = [], None
+            found, models, cursor = [], set(), None
             while True:
                 query = urllib.parse.urlencode({"limit": 200, **({"cursor": cursor} if cursor else {})})
                 with self._request(urllib.request.Request(f"{self.url}/voices?{query}")) as resp:
                     page = json.load(resp)
+                models.update(m["name"] for v in page["voices"] for m in v.get("models", []) if m.get("name"))
                 found += [
                     {"id": v["id"], "name": v.get("display_name"), "gender": v.get("gender"),
                      "locale": v.get("locale")}
@@ -67,6 +68,9 @@ class Speechify:
                 if not page["has_more"]:
                     break
                 cursor = page["next_cursor"]
+            if not found:  # a model Speechify doesn't have would otherwise fail only when a message is voiced
+                raise RuntimeError(f"[tts.speechify] model {self.model!r}: no Speechify voice supports it. Set it to "
+                                   f"one they have: {', '.join(sorted(models)) or '(their voices list no models)'}")
             self._voices = found
         return self._voices
 
