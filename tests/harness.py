@@ -31,6 +31,7 @@ plugin_path = ["{tests}"]
 [app]
 name = "Teapot"
 owner = "Robin"
+root_agent = true
 channels = {{ general = "Announcements" }}
 groups = [{{ name = "Builders", members = ["builder"] }}]
 

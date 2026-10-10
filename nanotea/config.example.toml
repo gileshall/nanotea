@@ -28,6 +28,9 @@ channels = { general = "Questions, approvals, announcements" }
 groups = [
   # { name = "Builders", members = ["builder", "tester"] },
 ]
+# A main line at /chat for a root agent: the one that listens with no --inbox, and that your replies to agents with
+# no line of their own go to. Off, every agent has its own line.
+root_agent = false
 
 # --- Look ----------------------------------------------------------------------------------------------------------
 [theme]

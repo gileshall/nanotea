@@ -53,7 +53,7 @@ def listen(client: Client, owner: str, name: str, line: str) -> str:
             if not (only_events and batch) or time.monotonic() - first_event >= EVENT_SETTLE_S:
                 if why := starter_gone(parent):
                     raise ValueError(why)
-                items = Mailbox(client, name, line, w["channels"], f"listen pid {os.getpid()}").take(False)
+                items = Mailbox(client, name, line, w["channels"], f"listen pid {os.getpid()}").take(False, ends=True)
                 if items:
                     return (handed(owner, items, "listen") + "\nStart nanotea listen again now, in the background: "
                             + command(name, line) + "\n")

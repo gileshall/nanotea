@@ -85,11 +85,12 @@ class Mailbox:
         items.sort(key=lambda it: it["at"])
         return items, receipts
 
-    def take(self, idle: bool) -> list[dict]:
-        """Everything new for this agent, oldest first, marked delivered."""
+    def take(self, idle: bool, ends: bool = False) -> list[dict]:
+        """Everything new for this agent, oldest first, marked delivered. ends: the taker exits once it has printed
+        them, so the owner is shown that nothing listens until another starts."""
         items, receipts = self.gather(idle)
         for path, body in receipts:
-            self.client.post(path, body)
+            self.client.post(path, {**body, "ends": True} if ends and "listener" in body else body)
         return items
 
 

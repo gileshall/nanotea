@@ -98,7 +98,7 @@ def wait_reply(base: str, msg_id: str) -> None:
             sys.exit(f"nanotea-tell: delivery failed: {msg['error']}")
         if reply is None and msg["set_aside"]:
             request(f"{base}/api/agents/{urllib.parse.quote(msg['sender'], safe='')}/answers/delivered",
-                    {"ids": [f"aside-{msg_id}"], "listener": taker("--ask")}, outlast=True)
+                    {"ids": [f"aside-{msg_id}"], "listener": taker("--ask"), "ends": True}, outlast=True)
             sys.exit(f"nanotea-tell: {OWNER} set this question aside without answering it; ask again if you still "
                      "need the answer")
         if reply is not None and reply["transcript_status"] == "pending" and not noted:
@@ -123,7 +123,7 @@ def wait_reply(base: str, msg_id: str) -> None:
                 for t in reply.get("takes", []):
                     print(take_line(f"{msg['dir']}/{t['stored'] or reply['audio']}", t))
             request(f"{base}/api/agents/{urllib.parse.quote(msg['sender'], safe='')}/answers/delivered",
-                    {"ids": [msg_id], "listener": taker("--ask")}, outlast=True)
+                    {"ids": [msg_id], "listener": taker("--ask"), "ends": True}, outlast=True)
             return
         time.sleep(3)
 
@@ -143,7 +143,7 @@ def wrote_meanwhile(base: str, msg: dict, parent: int) -> bool:
     orphaned(parent)
     print_inbox(pending)
     request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending],
-                                 "listener": taker("--ask")}, outlast=True)
+                                 "listener": taker("--ask"), "ends": True}, outlast=True)
     print(f"[{OWNER} wrote in your line while you waited. Your question {msg['id']} is still open; to wait for its "
           f"answer: nanotea-tell --from {json.dumps(sender)} --wait-reply {msg['id']}]")
     return True
@@ -340,8 +340,8 @@ def _listen(base: str, sender: str, about: str | None, box: str | None, channels
             if pending:
                 orphaned(parent)
                 print_inbox(pending)
-                request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener},
-                        outlast=True)
+                request(f"{api}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener,
+                                              "ends": True}, outlast=True)
                 got = True
         for channel in channels:
             ch = f"{base}/api/channels/{channel}"
@@ -349,8 +349,8 @@ def _listen(base: str, sender: str, about: str | None, box: str | None, channels
             if pending:
                 orphaned(parent)
                 print_channel(channel, pending)
-                request(f"{ch}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener},
-                        outlast=True)
+                request(f"{ch}/delivered", {"name": sender, "ids": [m["id"] for m in pending], "listener": listener,
+                                              "ends": True}, outlast=True)
                 got = True
         if got:
             return False
@@ -415,6 +415,8 @@ def board(base: str, stale: int | None) -> None:
         if r["connected"]:
             why = [w for w, on in (("listening", r["listening"]), ("responding", r["responding"]),
                                    ("typing", r["typing"])) if on]
+            if r.get("away"):  # its listener exited after handing it messages; none has started since
+                why.append(f"not listening since {ago(r['away'])}")
             return "connected: " + (", ".join(why) or f"listened {ago(r['listened'])}")
         return f"not connected, last seen {ago(r['seen'])}" if r["seen"] else "not connected, never seen"
 

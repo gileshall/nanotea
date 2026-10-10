@@ -134,6 +134,9 @@ APP = (
                              "app.", {}),
     Option("groups", list, "The sidebar's groups on a new install: { name, members }, members being agents' names. "
                            "Kept in data/groups.json after the first start.", []),
+    Option("root_agent", bool, "A main line, at /chat, for a root agent: the one that listens with no --inbox, and "
+                               "that replies to agents with no line of their own go to. Off, every agent has its "
+                               "own line and there is no main line.", False),
 )
 NOTIFY = (
     Option("now", list, "Notifiers that run when a message is ready: [\"push\"] for the web app's notifications.",

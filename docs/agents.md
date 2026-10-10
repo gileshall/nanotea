@@ -143,7 +143,7 @@ what the owner sends until told to stop.
 
 | Tool | Does |
 |---|---|
-| `join(name, voice?, about?, line?, channels?)` | Says who the agent is and opens its line. `line` defaults to the name; `main` is the shared main inbox. An agent holds one line: joining another while it holds one is refused until it releases that one. |
+| `join(name, voice?, about?, line?, channels?)` | Says who the agent is and opens its line. `line` defaults to the name; `main` is the shared main inbox, with `[app] root_agent` on. An agent holds one line: joining another while it holds one is refused until it releases that one. |
 | `send(text, title?, channel?, attach?, control?, re?)` | A message to the owner, or a post in a channel. `attach`: paths of audio, images, video or PDFs, placed with `[[audio N]]`, `[[image N]]`, `[[video N]]` or `[[pdf N]]`; audio plays in the voice, the rest shows on the page. `control`: something to tap (below). `re`: the id of the message this answers (below). |
 | `ask(question, title?, channel?, raw?, control?, re?)` | A question; returns its id at once. The answer arrives as kind `answer`. `raw`: ask for the answer recorded raw (below). `control`: the owner can answer with a tap. |
 | `check()` | Everything new, without waiting. Each item is delivered once. |

@@ -99,6 +99,21 @@ def box_of_segment(seg: str) -> str | None:
     return next((box for box, s in list(API_SEGMENT.items()) if s == seg), None)
 
 
+MAIN_PATHS = re.compile(r"/chat|/write|/(?:api|audio|bang|files)/inbox(?:/.*)?")
+NO_ROOT = ("there is no main line here: [app] root_agent is off. Each agent listens on its own line: nanotea-tell "
+           "--listen --inbox NAME")
+
+
+def main_in_use(root: Path) -> str | None:
+    """Why the main line can't go: someone holds it, or it has messages."""
+    meta, messages = root / "inbox" / "inbox.json", root / "inbox" / "messages"
+    if meta.exists() and (holder := json.loads(meta.read_text()).get("holder")):
+        return f"{holder} holds the main line"
+    if messages.is_dir() and (n := sum(1 for _ in messages.iterdir())):
+        return f"the main line has {n} message(s) in {messages}"
+    return None
+
+
 # What only the owner's key does: acting as the owner, changing settings, rules and tokens. Every other POST is
 # the agents' API, which needs a token.
 OWNER_POSTS = re.compile(rf"/api/messages/{M}/(drafts|files|reply|delete|heard|react|act|revoice)"
@@ -140,6 +155,14 @@ LEAF_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
 
 def _plain(s: str) -> str:
     return s.casefold()
+
+
+def ends(body: dict) -> bool:
+    """A receipt's "ends": true says the taker exits now that it has printed, so nothing listens for the agent."""
+    flag = body.get("ends", False)
+    if not isinstance(flag, bool):
+        raise ValueError("'ends' must be true or false")
+    return flag
 
 
 class SessionError(Exception):
@@ -334,8 +357,11 @@ class App:
         self.dms_path = self.store.root / "dms.json"  # direct lines: {name: label}
         for box, label in (json.loads(self.dms_path.read_text()) if self.dms_path.exists() else {}).items():
             pages.add_dm(box, label)
+        self.root = cfg["app"]["root_agent"]
+        if not self.root and (why := main_in_use(self.store.root)):
+            raise ConfigError(f"[app] root_agent is off, but {why}. Set root_agent = true to keep the main line")
         self.boxes = {box: Inbox(self.store.root / ("inbox" if box == "main" else f"inbox-{box}"), self.store.index)
-                      for box in API_SEGMENT}
+                      for box in API_SEGMENT if box != "main" or self.root}
         self.dm_lock = threading.Lock()
         self.claim_lock = threading.Lock()  # one line per agent, across lines
         self.voices = VoiceBook(self.store.root / "voices.json")
@@ -379,6 +405,8 @@ class App:
         self.typing: dict[str, dict[str, float]] = {}  # an inbox, or "#channel" -> agent -> monotonic time
         self.typing_lock = threading.Lock()
         self.last_listen = {box: 0.0 for box in self.boxes}  # monotonic time of each holder's last poll
+        # An agent whose listener handed it something and exited: monotonic time, and wall time as ISO.
+        self.handed: dict[str, tuple[float, str]] = {}
         self.channels = Channels(self.store.root, self.store.index, self.app_cfg["name"], self.app_cfg["channels"])
         self.settings = SettingsBook(self.store.root, cfg.get("settings"))
         # Bang commands: queued ones by message id -> {box, state, queued, expire_s, timeout_s, session, started}.
@@ -675,8 +703,9 @@ class App:
             return {"at": h["at"], "what": h["what"]} if h else None
 
     def presence(self, box: str) -> tuple[str, str]:
-        """Who is there to pick up what the owner sends on a line: (state, words). state: held, listening, open
-        (a session is open but not checking now), closed, or nobody (no holder)."""
+        """Who is there to pick up what the owner sends on a line: (state, words). state: held, listening, away
+        (its listener handed it messages and exited, and none has polled since), open (a session is open but not
+        checking now), closed, or nobody (no holder)."""
         holder = self.boxes[box].info()["holder"]
         if holder is None:
             return "nobody", "nobody holds this line"
@@ -684,6 +713,9 @@ class App:
             return "held", f"held at a permission prompt since {pages.clock(held['at'])}"
         if self.listening(box):
             return "listening", "listening now"
+        if away := self.away(box):
+            return "away", (f"not listening since {pages.clock(away)}: its listener handed it messages and it hasn't "
+                            "listened again; yours wait until it does")
         if self.open_sessions(holder):
             last = self.listened.all().get(holder)
             return "open", ("session open, " + (f"last checked {pages.ago(last)}" if last else "hasn't checked yet"))
@@ -698,6 +730,8 @@ class App:
     def claim(self, box: str, name: str, about: str | None) -> dict:
         """An agent holds one line: two would give it two rows in the sidebar, each showing all its messages, and
         nothing to say which line its own messages belong to."""
+        if box not in self.boxes:
+            raise InboxError(404, NO_ROOT if box == "main" else f"no line {box!r}")
         with self.claim_lock:
             self.one_line(box, name)
             return self.boxes[box].claim(name, about)
@@ -859,7 +893,8 @@ class App:
     def sidebar(self) -> dict:
         """channels: rows of path, name, role, unread, listening, and typing (agents typing there). groups:
         [{name, rows}], a row for each direct line and for each agent with direct messages and no line: path,
-        name, role, who, agent (its holder or sender; None for a line nobody holds), unread, listening, status,
+        name, role, who, agent (its holder or sender; None for a line nobody holds), unread, listening, away (since
+        when its listener handed it messages and exited, with none back; or None), status,
         typing (its holder or nobody), responding, listened (its last listener poll, or None), connected, and
         seen (for one not connected, when it was last seen: listened, wrote, or set its status; or None),
         session ({since, count} of its open MCP sessions, or None) and held ({at, what} while it is at a
@@ -905,7 +940,8 @@ class App:
             typing = [a for a in self.typing_in(box) if a == holder]
             row = {"path": CHAT_PATH[box], "name": title[0], "role": " · ".join(title[1:]), "who": pages.who(sender),
                    "mark": sender, "agent": holder, "unread": count((s, None) for s in senders if owner[s] == box),
-                   "listening": self.listening(box), "status": statuses.get(holder) if holder else None,
+                   "listening": self.listening(box), "away": self.away(box),
+                   "status": statuses.get(holder) if holder else None,
                    "typing": typing, "responding": bool(holder) and self.responding(box, info, sent),
                    "listened": listened.get(holder) if holder else None,
                    "session": self.session_of(holder), "held": self.held_of(holder)}
@@ -920,7 +956,8 @@ class App:
             plain = s
             row = {"path": f"/?from={quote(s)}", "name": names.get(s) or s,
                    "role": plain if _plain(plain) != _plain(names.get(s) or s) else "", "who": pages.who(s),
-                   "mark": s, "agent": s, "unread": count([(s, None)]), "listening": False, "status": statuses.get(s),
+                   "mark": s, "agent": s, "unread": count([(s, None)]), "listening": False, "away": None,
+                   "status": statuses.get(s),
                    "typing": [], "responding": False, "listened": listened.get(s), "session": self.session_of(s),
                    "held": self.held_of(s)}
             row["connected"] = bool(row["session"]) or recent(listened.get(s))
@@ -999,6 +1036,13 @@ class App:
 
     def box_of(self, sender: str) -> str | None:
         return next((box for box, holder in self.holders().items() if holder == sender), None)
+
+    def lineless(self, sender: str) -> str:
+        """Where the owner's answer to an agent with no line goes: the main line, if there is one."""
+        if not self.root:
+            raise InboxError(409, f"{sender} holds no line, and there is no main line ([app] root_agent is off), so "
+                                  "nothing would reach it. It can ask, or listen on a line of its own")
+        return "main"
 
     def path_for(self, msg: Message) -> str:
         """Where a message opens in the app: its channel, or its conversation for an inbox holder's messages."""
@@ -1354,6 +1398,19 @@ class App:
     def listening(self, box: str) -> bool:
         return time.monotonic() - self.last_listen[box] < LISTENING_WINDOW_S
 
+    def handed_over(self, agent: str) -> None:
+        """A listener that exits once it has printed (nanotea-tell, nanotea listen) took items for agent: until
+        another polls, nothing is listening for it, however busy it is."""
+        self.handed[_plain(agent)] = (time.monotonic(), datetime.now().astimezone().isoformat(timespec="seconds"))
+
+    def away(self, box: str) -> str | None:
+        """Since when the holder's listener handed it messages and exited, with none polling since; else None."""
+        holder = self.boxes[box].info()["holder"]
+        handed = self.handed.get(_plain(holder)) if holder else None
+        if handed is None or self.listening(box) or self.last_listen[box] > handed[0]:
+            return None
+        return handed[1]
+
     def transcribe_reply(self, msg_id: str) -> None:
         recording = self.store.path(msg_id, self.store.reply(msg_id)["audio"])
         self.transcriber.submit((f"reply to {msg_id}", recording, partial(self.store.update_reply, msg_id)))
@@ -1570,6 +1627,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self._guard(self._do_get)
 
+    def _no_root(self, path: str, query: dict) -> bool:
+        """Refuses what is for the main line when there is none ([app] root_agent off)."""
+        main = MAIN_PATHS.fullmatch(path) or "inbox" in query.get("line", []) + query.get("where", [])
+        if self.app.root or not main:
+            return False
+        if PAGES.fullmatch(path):
+            self._html(pages.not_found(NO_ROOT), 404)
+        else:
+            self._json(404, {"error": NO_ROOT})
+        return True
+
     def _do_get(self) -> None:
         self.who = None
         if self._refuse_foreign():
@@ -1623,6 +1691,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._redirect(self.app.public_url + self.path)
             return self._refuse(err)
         self.who = who
+        if self._no_root(path, query):
+            return
         app, store = self.app, self.app.store
         is_owner = who.kind == "owner"  # a paired browser, so page views count as seen
         holders = app.holders()
@@ -1892,6 +1962,8 @@ class Handler(BaseHTTPRequestHandler):
         except AuthError as err:
             return self._refuse(err)
         self.who = who
+        if self._no_root(path, {}):
+            return
         if path == "/api/messages":
             return self._create(body)
         if path == "/api/settings":
@@ -2077,7 +2149,10 @@ class Handler(BaseHTTPRequestHandler):
             app.channels.get(msg.channel).add(emoji, None, re_, reaction=True)
             log.info("the owner reacted %s to %s in #%s", emoji, msg_id, msg.channel)
             return self._json(200, {"ok": True, "sent": f"#{msg.channel}"})
-        box = app.box_of(msg.sender) or "main"
+        try:
+            box = app.box_of(msg.sender) or app.lineless(msg.sender)
+        except InboxError as err:
+            return self._json(err.status, {"error": str(err)})
         inbox = app.boxes[box]
         inbox.add(emoji, None, inbox.info()["holder"], re_, reaction=True)
         log.info("the owner reacted %s to %s; sent to the %s inbox", emoji, msg_id, box)
@@ -2483,6 +2558,11 @@ class Handler(BaseHTTPRequestHandler):
         plugin = app.controls.get(kind)
         if plugin is None:
             return self._json(409, {"error": f"the {kind} control is not installed"})
+        if not msg.ask and msg.channel is None and app.box_of(msg.sender) is None:
+            try:
+                app.lineless(msg.sender)  # before the control acts: its words would reach nobody
+            except InboxError as err:
+                return self._json(err.status, {"error": str(err)})
         with app.control_lock:
             if msg.ask and store.reply(msg_id) is not None:
                 return self._json(409, {"error": "this question is already answered"})
@@ -2511,7 +2591,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _tapped(self, msg: Message, says: str, tap: dict) -> str:
         """Where a tap's words go: the answer to a question still waiting, else the post's channel, else the
-        sender's line (or the main inbox), as a reaction would."""
+        sender's line (or the main line, if there is one), as a reaction would."""
         app, store = self.app, self.app.store
         if msg.ask:
             store.save_reply(msg.id, {"at": now_iso(), "text": says, "tap": tap, "audio": None, "transcript": None,
@@ -2521,7 +2601,7 @@ class Handler(BaseHTTPRequestHandler):
         if msg.channel is not None:
             app.channels.get(msg.channel).add(says, None, re_, tap=tap)
             return f"#{msg.channel}"
-        box = app.box_of(msg.sender) or "main"
+        box = app.box_of(msg.sender) or app.lineless(msg.sender)
         inbox = app.boxes[box]
         inbox.add(says, None, inbox.info()["holder"], re_, tap=tap)
         return box
@@ -2955,7 +3035,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("'ids' must be a list of message ids")
             if listener is not None and not (isinstance(listener, str) and len(listener) <= 80):
                 raise ValueError("'listener' must be a short string")
+            done = ends(body)
             self.app.talk.mark_delivered(name, ids, listener)
+            if done:
+                self.app.handed_over(name)
         except TalkError as err:
             return self._json(err.status, {"error": str(err)})
         except (KeyError, TypeError, ValueError) as err:
@@ -3182,7 +3265,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("'ids' must be a list of item ids")
             if listener is not None and not (isinstance(listener, str) and len(listener) <= 80):
                 raise ValueError("'listener' must be a short string")
+            done = ends(body)
             self.app.channels.get(name).mark_delivered(agent.strip(), ids, listener)
+            if done:
+                self.app.handed_over(agent.strip())
         except ChannelError as err:
             return self._json(err.status, {"error": str(err)})
         except (KeyError, TypeError, ValueError) as err:
@@ -3292,6 +3378,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("'ids' must be a list of message ids, or aside-<id>")
             if listener is not None and not (isinstance(listener, str) and len(listener) <= 80):
                 raise ValueError("'listener' must be a short string")
+            done = ends(body)
             store = self.app.store
             for i in ids:
                 q = i.removeprefix("aside-")
@@ -3307,6 +3394,8 @@ class Handler(BaseHTTPRequestHandler):
                     store.mark_aside_delivered(i.removeprefix("aside-"), listener)
                 else:
                     store.mark_answer_delivered(i, listener)
+            if done:
+                self.app.handed_over(agent)
         except (KeyError, TypeError, ValueError) as err:
             return self._json(400, {"error": f"{type(err).__name__}: {err}"})
         log.info("answers delivered to %s: %s", agent, ", ".join(ids))
@@ -3353,7 +3442,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("'ids' must be a list of message ids")
             if listener is not None and not (isinstance(listener, str) and len(listener) <= 80):
                 raise ValueError("'listener' must be a short string")
+            done = ends(body)
             self.app.boxes[box].mark_delivered(name, ids, listener)
+            if done:
+                self.app.handed_over(name)
         except InboxError as err:
             return self._json(err.status, {"error": str(err)})
         except (KeyError, TypeError, ValueError, FileNotFoundError) as err:

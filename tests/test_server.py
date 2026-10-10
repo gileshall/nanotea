@@ -40,6 +40,7 @@ env_file = "{env}"
 [app]
 name = "Teapot"
 owner = "Robin"
+root_agent = true
 channels = {{ general = "Announcements" }}
 groups = [{{ name = "Builders", members = ["builder"] }}]
 
@@ -839,6 +840,47 @@ class Service(Tokens, unittest.TestCase):
         self.assertIn("for whoever reads", r.stdout)
         self.assertNotIn("nothing new", r.stderr)
         self.assertIn("nothing new", check().stderr)
+
+    def test_a_listener_that_ended_shows_nobody_listening(self):
+        def listening():
+            board = json.loads(self.local("GET", "/api/board")[1])
+            return any(r["agent"] == "Ola" and r["listening"] for g in board["sidebar"]["groups"] for r in g["rows"])
+
+        listener = self.listen("--from", "Ola", "--inbox", "ola")
+        try:
+            self.wait_for(listening, "Ola's listener")
+            self.assertIsNone(self.row("Ola")[1]["away"])
+            self.assertEqual(self.call("POST", "/api/dm-ola/messages", {"text": "while you work"})[0], 200)
+            out, _ = listener.communicate(timeout=20)
+        finally:
+            self.stop(listener)
+        self.assertIn("while you work", out)
+        self.wait_for(lambda: not self.row("Ola")[1]["listening"], "the listening window to pass")
+        away = self.row("Ola")[1]["away"]
+        self.assertIsNotNone(away)
+        self.assertIn("not listening since", self.tell("--board"))
+        self.assertEqual(self.call("POST", "/api/dm-ola/messages", {"text": "and this waits"})[0], 200)
+        status, page = self.call("GET", "/chat/ola")
+        self.assertEqual(status, 200)
+        self.assertIn("not listening since", page)
+        self.assertIn("yours wait until it does", page)
+        self.assertIn('<span class="stl away"><span class="st-text">not listening</span>', page)
+        # Another listener takes it, and the line is listened to again.
+        listener = self.listen("--from", "Ola", "--inbox", "ola")
+        try:
+            out, _ = listener.communicate(timeout=20)
+        finally:
+            self.stop(listener)
+        self.assertIn("and this waits", out)
+        listener = self.listen("--from", "Ola", "--inbox", "ola")
+        try:
+            self.wait_for(listening, "Ola's next listener")
+            self.assertIsNone(self.row("Ola")[1]["away"])
+        finally:
+            self.stop(listener)
+        status, body = self.local("POST", "/api/dm-ola/delivered", {"name": "Ola", "ids": [], "ends": "yes"},
+                                  as_="Ola")
+        self.assertEqual(status, 400, body)
 
     @staticmethod
     def kill(pid):

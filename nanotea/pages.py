@@ -102,6 +102,9 @@ body.dragging #side { box-shadow: 0 0 40px #0008; }
 /* Held at a permission prompt: amber, steady. */
 .dot.held { background: var(--amber); }
 .stl.held { color: var(--amber); opacity: 1; }
+/* Its listener handed it messages and exited, and none has started since: an amber ring, nothing listening. */
+.dot.away { background: var(--side); border: 2px solid var(--amber); box-sizing: border-box; }
+.stl.away { color: var(--amber); opacity: 1; }
 .foot { margin-top: 1.2rem; padding-top: 0.6rem; border-top: 1px solid var(--side-hover); }
 /* Settings, Rules and Agent talk. */
 .form { max-width: 42rem; }
@@ -1328,11 +1331,16 @@ def _sidebar(bar: dict) -> str:
         unread = f'<span class="count">{c["unread"]}</span>' if c["unread"] else ""
         pulse = bool(c["typing"]) or c.get("responding", False)
         held = c.get("held")
+        away = None if held or c["listening"] else c.get("away")
         why = ("held at a permission prompt" if held
                else f'{", ".join(who(a) for a in c["typing"])} typing' if c["typing"]
                else "working on your message" if pulse else "listening")
-        dot = (f'<span class="dot{" held" if held else " pulse" if pulse else ""}" title="{e(why)}"></span>'
-               if c["listening"] or pulse or held else "")
+        if away:
+            why = ((f"{why}; " if pulse else "")
+                   + f"not listening since {clock(away)}; your messages wait until it listens again")
+        kind = " held" if held else " pulse" if pulse else " away" if away else ""
+        dot = (f'<span class="dot{kind}" title="{e(why)}"></span>'
+               if c["listening"] or pulse or held or away else "")
         cls = " unread" if c["unread"] else ""
         if channel:
             topic = f' title="{e(c["role"])}"' if c["role"] else ""
@@ -1341,6 +1349,8 @@ def _sidebar(bar: dict) -> str:
         role = f'<span class="role">{e(c["role"])}</span>' if c["role"] else ""
         if held:
             role += f'<span class="stl held"><span class="st-text">held at a permission prompt</span>{_age_span(held["at"])}</span>'
+        if away:
+            role += f'<span class="stl away"><span class="st-text">not listening</span>{_age_span(away)}</span>'
         st = c["status"]
         if st:
             role += f'<span class="stl"><span class="st-text">{e(st["text"])}</span>{_age_span(st["at"])}</span>'
@@ -2657,9 +2667,10 @@ def _spoken_by_owner(item: dict, audio_url: str, files_base: str) -> str:
     return "\n".join(parts)
 
 
-def reply_box(msg: Message, holders: dict[str, str | None]) -> str:
-    """Replies to an inbox holder's message go to that holder; anything else goes through the main inbox."""
-    return next((box for box, holder in holders.items() if holder == msg.sender), "main")
+def reply_box(msg: Message, holders: dict[str, str | None]) -> str | None:
+    """Replies to an inbox holder's message go to that holder; anything else goes through the main line, or with
+    none ([app] root_agent off), nowhere."""
+    return next((box for box, holder in holders.items() if holder == msg.sender), "main" if "main" in holders else None)
 
 
 def _linkify(text: str) -> str:
@@ -2840,8 +2851,10 @@ def _article(store: Store, msg: Message, mode: str, holders: dict[str, str | Non
         api = f"/api/channels/{msg.channel}"
         parts.append(_recorder(f"Reply in #{msg.channel}", f"{api}/drafts", f"{api}/messages", f"{api}/files",
                                msg.id))
+    elif mode == "page" and (box := reply_box(msg, holders)) is None:
+        parts.append(f'<p class="facts">{e(who(msg.sender))} holds no line, so a reply here would reach nobody. It can '
+                     'ask, or listen on a line of its own.</p>')
     elif mode == "page":
-        box = reply_box(msg, holders)
         if holders[box] == msg.sender:
             parts.append(f'<p><a href="{CHAT_PATH[box]}#m-{msg.id}">Open the conversation</a></p>')
         to = holders[box]

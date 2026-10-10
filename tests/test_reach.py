@@ -34,7 +34,8 @@ class Config(unittest.TestCase):
                          {"host": "127.0.0.1", "port": 7447, "trusted_proxies": [], "data_dir": "data",
                           "plugin_path": []})
         self.assertNotIn("env_file", cfg)
-        self.assertEqual(cfg["app"], {"owner": "Robin", "name": "Nanotea", "channels": {}, "groups": []})
+        self.assertEqual(cfg["app"], {"owner": "Robin", "name": "Nanotea", "channels": {}, "groups": [],
+                                      "root_agent": False})
         self.assertEqual(cfg["notify"], {"now": [], "escalate": [], "escalate_after_min": 30})
 
     def test_mistakes_are_named(self):
