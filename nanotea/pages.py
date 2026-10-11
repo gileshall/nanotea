@@ -2660,7 +2660,7 @@ def _spoken_by_owner(item: dict, audio_url: str, files_base: str) -> str:
         elif file["type"].startswith("audio/"):
             parts.append(f'<audio controls preload="none" src="{e(url)}" data-title="{e(file["name"])}" '
                          f'data-artist="{e(_owner())}"></audio>'
-                         f'<a class="file" href="{e(url)}" download="{e(file["name"])}">{e(file["name"])}, '
+                         f'<a class="file" href="{e(url)}?save=1" download="{e(file["name"])}">{e(file["name"])}, '
                          f'{_size(file["size"])}, as sent</a>')
         else:
             parts.append(f'<a class="file" href="{e(url)}"{NEW_TAB}>PDF: {e(file["name"])}</a>')
@@ -2826,9 +2826,13 @@ def _article(store: Store, msg: Message, mode: str, holders: dict[str, str | Non
         def original(n: int, stored: str) -> str:
             name = e(stored.split("-", 1)[1])
             if media_kind(stored) != "audio":
-                return f'<div class="clip">{n}. <a href="/attachment/{msg.id}/{n}" download="{name}">{name}</a></div>'
+                return (f'<div class="clip">{n}. <a href="/attachment/{msg.id}/{n}?save=1" download="{name}">{name}</a>'
+                        f'</div>')
+            size = _size((store.path(msg.id, "attachments") / stored).stat().st_size)
             return (f'<div class="clip">{n}. {name}</div><audio controls preload="none" src="/attachment/{msg.id}/{n}" '
-                    f'data-n="{n}" data-title="{name}" data-artist="{e(sender)}"></audio>')
+                    f'data-n="{n}" data-title="{name}" data-artist="{e(sender)}"></audio>'
+                    f'<a class="file" href="/attachment/{msg.id}/{n}?save=1" download="{name}">Download {name}, '
+                    f'{size}, as sent</a>')
         kinds = {media_kind(a) for a in msg.attachments}
         summary = "Attached audio, original files" if kinds == {"audio"} else "Attached files, as sent"
         parts.append(f'<details{" open" if "audio" in kinds else ""}><summary>{summary}</summary>'

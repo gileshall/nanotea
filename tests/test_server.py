@@ -651,6 +651,37 @@ class Service(Tokens, unittest.TestCase):
         status, out = self.upload("/api/channels/general/files", "screen.mov", "video/quicktime", b"moov")
         self.assertEqual(status, 200, out)
 
+    def test_shared_audio_saves(self):
+        mp3 = b"ID3" + bytes(2000)
+        status, body = self.local("POST", "/api/messages", {"text": "Two mixes.", "from": "Pix", "voice": "v7",
+                                                            "attachments": [{"name": "mix é.mp3",
+                                                                             "data": base64.b64encode(mp3).decode()}]})
+        self.assertEqual(status, 202, body)
+        msg_id = json.loads(body)["id"]
+        page = self.call("GET", f"/m/{msg_id}")[1]
+        self.assertIn(f'<a class="file" href="/attachment/{msg_id}/1?save=1" download="mix__.mp3">Download mix__.mp3, '
+                      f'2.0 KB, as sent</a>', page)
+        for query, want in (("", None), ("?save=1", "attachment; filename=\"mix__.mp3\"; filename*=UTF-8''mix__.mp3")):
+            conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
+            conn.request("GET", f"/attachment/{msg_id}/1{query}", headers={**PROXY, "Cookie": f"{COOKIE}={self.key}"})
+            r = conn.getresponse()
+            self.assertEqual((r.status, r.getheader("Content-Disposition"), r.read()), (200, want, mp3))
+            conn.close()
+        status, out = self.upload("/api/channels/general/files", "Take é.wav", "audio/wav", b"RIFF" + bytes(64))
+        self.assertEqual(status, 200, out)
+        status, body = self.call("POST", "/api/channels/general/messages", {"text": "a take", "files": [out["file"]]})
+        self.assertEqual(status, 200, body)
+        page = self.call("GET", "/c/general")[1]
+        url = re.findall(r'<a class="file" href="(/files/c/general/[^"]+)\?save=1" download="Take é\.wav">', page)
+        self.assertEqual(len(url), 1, page[-3000:])
+        conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
+        conn.request("GET", url[0] + "?save=1", headers={**PROXY, "Cookie": f"{COOKIE}={self.key}"})
+        r = conn.getresponse()
+        self.assertEqual(r.getheader("Content-Disposition"), "attachment; filename=\"Take _.wav\"; "
+                         "filename*=UTF-8''Take%20%C3%A9.wav")
+        r.read()
+        conn.close()
+
     @unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
     def test_raw_takes(self):
         def wav(name, seconds):

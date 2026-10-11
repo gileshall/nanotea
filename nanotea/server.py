@@ -2029,7 +2029,8 @@ class Handler(BaseHTTPRequestHandler):
             if not 1 <= n <= len(stored):
                 return self._file(None)
             ext = stored[n - 1].rsplit(".", 1)[-1].lower()
-            return self._file(store.path(m[1], "attachments") / stored[n - 1], AUDIO_TYPES.get(ext) or files.BY_EXT[ext])
+            return self._file(store.path(m[1], "attachments") / stored[n - 1],
+                              AUDIO_TYPES.get(ext) or files.BY_EXT[ext], stored[n - 1].split("-", 1)[1])
         return self._json(404, {"error": f"not found: {path}"})
 
     def do_POST(self) -> None:
@@ -3648,9 +3649,9 @@ class Handler(BaseHTTPRequestHandler):
         record = next((f for f in (item or {}).get("files", []) if Path(f["stored"]).name == basename), None)
         if record is None:
             return self._json(404, {"error": "no such file"})
-        self._file(base / record["stored"], record["type"])
+        self._file(base / record["stored"], record["type"], record["name"])
 
-    def _file(self, path: Path | None, ctype: str | None = None) -> None:
+    def _file(self, path: Path | None, ctype: str | None = None, name: str | None = None) -> None:
         # Byte ranges are required for playback in iOS Safari.
         if not path or not path.is_file():
             return self._json(404, {"error": "no audio"})
@@ -3676,6 +3677,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(end - start + 1))
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        if name and "save" in parse_qs(urlsplit(self.path).query):
+            # The download attribute alone plays the file in an installed iOS web app rather than saving it.
+            plain = re.sub(r'[^A-Za-z0-9._ -]', "_", name)
+            self.send_header("Content-Disposition", f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quote(name)}")
         self.end_headers()
         with path.open("rb") as f:
             f.seek(start)
