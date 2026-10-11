@@ -160,10 +160,10 @@ def _plain(s: str) -> str:
     return s.casefold()
 
 
-def after_handover(handed: float | None, listening: bool, last_listen: float, now: float) -> str | None:
+def after_handover(handed: float | None, listening: bool, last_listen: float | None, now: float) -> str | None:
     """What an agent whose listener handed it items and exited is doing, with none polling since: busy for
     RELISTEN_GRACE_S, as it reads and answers, then away. None once a listener polls again."""
-    if handed is None or listening or last_listen > handed:
+    if handed is None or listening or (last_listen is not None and last_listen > handed):
         return None
     return "busy" if now - handed < RELISTEN_GRACE_S else "away"
 
@@ -418,7 +418,8 @@ class App:
         self.pushed: dict[str, str] = {}  # casefolded agent -> when its push hook last ran, since this start
         self.typing: dict[str, dict[str, float]] = {}  # an inbox, or "#channel" -> agent -> monotonic time
         self.typing_lock = threading.Lock()
-        self.last_listen = {box: 0.0 for box in self.boxes}  # monotonic time of each holder's last poll
+        # monotonic time of each holder's last poll; None, not 0.0: monotonic counts from boot, so 0 can be recent
+        self.last_listen: dict[str, float | None] = {box: None for box in self.boxes}
         # An agent whose listener handed it something and exited: monotonic time, and wall time as ISO.
         self.handed: dict[str, tuple[float, str]] = {}
         self.channels = Channels(self.store.root, self.store.index, self.app_cfg["name"], self.app_cfg["channels"])
@@ -991,7 +992,7 @@ class App:
             tmp.write_text(json.dumps(dms, indent=2))
             os.replace(tmp, self.dms_path)
             pages.add_dm(box, label)
-            self.last_listen[box] = 0.0
+            self.last_listen[box] = None
             self.idle_at[box] = None
             self.boxes[box] = Inbox(self.store.root / f"inbox-{box}", self.store.index)
         log.info("new direct line %s (%s)", box, label)
@@ -1516,11 +1517,12 @@ class App:
 
     def listening(self, box: str) -> bool:
         """A poll within LISTENING_WINDOW_S, and not one that took items for a listener that then exited."""
-        if time.monotonic() - self.last_listen[box] >= LISTENING_WINDOW_S:
+        last = self.last_listen[box]
+        if last is None or time.monotonic() - last >= LISTENING_WINDOW_S:
             return False
         holder = self.boxes[box].info()["holder"]
         handed = self.handed.get(_plain(holder)) if holder else None
-        return handed is None or self.last_listen[box] > handed[0]
+        return handed is None or last > handed[0]
 
     def voice_note(self, sender: str, voice: str) -> str | None:
         """What the sender should know if its voice can't be played: after the voice engine changes, an agent keeps

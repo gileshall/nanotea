@@ -6,6 +6,7 @@ import time
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 from harness import CONFIG, ROOT
 from nanotea.config import load_config
@@ -54,6 +55,16 @@ class Unheard(unittest.TestCase):
         self.assertEqual(self.app.check_unheard(self.at + timedelta(minutes=5)), [])
         self.app.handed["wren"] = (time.monotonic() - 1, self.at.isoformat())  # busy again: nothing to tell
         self.assertEqual(self.app.check_unheard(self.at + timedelta(minutes=5)), [])
+
+    def test_soon_after_boot_a_line_never_polled_isnt_listening(self):
+        # monotonic counts from boot: 30 s in, an hour-old hand-over is negative and a line never polled isn't at 0
+        with mock.patch("time.monotonic", return_value=30.0):
+            self.assertFalse(self.app.listening("main"))
+            self.assertEqual([n.title for n in self.app.check_unheard(self.at + timedelta(minutes=10))],
+                             ["Wren hasn't picked up your message"])
+            self.app.handed["wren"] = (30.0 - 3600, (self.at - timedelta(hours=1)).isoformat())
+            self.assertEqual([n.title for n in self.app.check_unheard(self.at + timedelta(minutes=20))],
+                             ["Wren stopped listening"])
 
     def test_quiet_hours_put_it_off_and_a_mute_stops_it(self):
         later = self.at + timedelta(minutes=10)
