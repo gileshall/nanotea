@@ -15,6 +15,7 @@ from mcp.client.stdio import StdioServerParameters
 
 from harness import Case
 from nanotea import delivery, sop
+from nanotea.mailbox import Mailbox, claim
 from nanotea.client import Client as Service
 from nanotea.config import ConfigError
 from nanotea.mcp_server import Agent, make, options
@@ -135,6 +136,58 @@ class Modes(Case):
         self.assertEqual(proc.returncode, 0, err)
         self.assertIn("routine chatter for the room", out)  # it comes with what woke it
         self.assertIn("@Teller the build is red", out)
+
+    def test_two_takers_never_hand_over_the_same_item(self):
+        self.open("Twin", ["general"])
+        self.local("GET", "/api/channels/general/pending?name=Twin")  # its cursor starts here
+        self.owner_says("Twin", "on the line")
+        post = self.send("poster", "@Twin in the channel", channel="general")
+        asked = self.send("Twin", "which one?", ask=True)
+        self.assertEqual(self.call("POST", f"/api/messages/{asked}/reply", {"text": "the left"})[0], 200)
+        self.assertEqual(self.call("POST", "/api/settings", {"agent_messages": "shown"})[0], 200)
+        try:
+            self.assertEqual(self.local("POST", "/api/talk", {"from": "poster", "to": "Twin", "text": "psst"},
+                                        as_="poster")[0], 200)
+        finally:
+            self.assertEqual(self.call("POST", "/api/settings", {"agent_messages": DEFAULTS["agent_messages"]})[0],
+                             200)
+        client = Service(self.port, self.token("Twin"))
+        one, two = (Mailbox(client, "Twin", "twin", ["general"], f"pid {n}") for n in (1, 2))
+        first, second = one.gather(False), two.gather(False)  # both saw everything before either claimed
+        self.assertEqual([len(got) for _, _, got in first], [1, 1, 1, 1])
+        items = claim(client, first, False)
+        self.assertEqual({it["kind"] for it in items}, {"message", "post", "answer", "agent"})
+        self.assertIn(post, [it["id"] for it in items])
+        self.assertEqual(claim(client, second, False), [])
+        # The same taker asking again, its first answer lost, is given them again.
+        self.assertEqual(claim(client, first, False), items)
+
+    def test_a_listener_prints_only_what_it_was_given(self):
+        self.local("GET", "/api/channels/general/pending?name=Pair")  # its cursor starts here
+        self.send("poster", "@Pair only once", channel="general")
+        # Another taker claims the post between this listener's look and its claim.
+        script = """if True:
+            import sys
+            from nanotea import tell
+            from nanotea.credentials import agent_token
+            tell.TOKEN = agent_token("Pair")
+            look = tell.request
+
+            def racing(url, body=None, **kw):
+                out = look(url, body, **kw)
+                if body is None and "/pending" in url and out:
+                    look(url.split("/pending")[0] + "/delivered",
+                         {"name": "Pair", "ids": [m["id"] for m in out], "listener": "the other"})
+                return out
+
+            tell.request = racing
+            tell._listen(sys.argv[1], "Pair", None, None, ["general"], False, once=True)
+        """
+        r = subprocess.run([sys.executable, "-c", script, f"http://127.0.0.1:{self.port}"], cwd=self.tmp.name,
+                           env=self.env_for("Pair"), capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("only once", r.stdout)
+        self.assertIn("another taker for Pair was given them first", r.stderr)
 
     def test_push_hands_over_after_a_tool_call_only_in_push_mode(self):
         self.open("Plain")

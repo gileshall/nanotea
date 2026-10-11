@@ -1,8 +1,8 @@
 """The owner's inbox for the main agent: the owner writes any time, or replies to any agent's message through it;
 the main agent picks messages up with nanotea-tell --listen. One agent holds the inbox at a time.
 
-data/inbox/inbox.json, and messages/<id>/meta.json plus any audio. Delivery is at least once:
-messages stay pending until the holder's listener marks them delivered.
+data/inbox/inbox.json, and messages/<id>/meta.json plus any audio. Messages stay pending until
+the holder's listener marks them delivered; of two takers, the first to mark one hands it over.
 """
 
 import json
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from nanotea import files
 from nanotea.index import Index
-from nanotea.store import DRAFT_PATTERN, ID_PATTERN, now_iso
+from nanotea.store import DRAFT_PATTERN, ID_PATTERN, now_iso, retaken
 
 
 def excerpt(m: dict) -> str | None:
@@ -195,12 +195,14 @@ class Inbox(Folder):
         return [m for m in self.messages("delivered_at IS NULL AND transcript_status != 'pending'")[::-1]
                 if not m.get("bang") or m["bang"]["state"] == "done"]
 
-    def mark_delivered(self, name: str, ids: list[str], listener: str | None = None) -> None:
-        """listener: the listener process that printed them (e.g. "pid 123"). Every delivery is kept, so
-        a message two listeners printed shows both; delivered_to and delivered_at stay the first."""
+    def mark_delivered(self, name: str, ids: list[str], listener: str | None = None) -> list[str]:
+        """listener: the listener process that takes them (e.g. "pid 123"). Returns the ids it is given: those no
+        other took first, so two takers never both hand the agent one. Every delivery is kept; delivered_to and
+        delivered_at stay the first."""
         self.check_holder(name)
         at = now_iso()
         owners = False  # one of the owner's own messages among them
+        taken = []
         with self._lock:
             for msg_id in ids:
                 path = self._msg_dir(msg_id) / "meta.json"
@@ -208,6 +210,9 @@ class Inbox(Folder):
                 if msg["delivered_at"] is None:
                     msg["delivered_to"], msg["delivered_at"] = name, at
                     owners = owners or not any(msg.get(k) for k in ("event", "reaction", "tap", "bang"))
+                    taken.append(msg_id)
+                elif msg.get("deliveries") and retaken(msg["deliveries"][0]["by"], listener):
+                    taken.append(msg_id)
                 # Messages delivered before listeners were recorded have no "deliveries".
                 msg["deliveries"] = msg.get("deliveries", []) + [{"to": name, "at": at, "by": listener}]
                 self._write(path, msg)
@@ -215,3 +220,4 @@ class Inbox(Folder):
             if owners:
                 self._write(self._meta, {**self.info(),
                                          "owner_delivered_at": datetime.now().astimezone().isoformat()})
+        return taken

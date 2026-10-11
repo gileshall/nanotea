@@ -73,52 +73,57 @@ class Mailbox:
         self.channels = channels
         self.listener = listener
 
-    def gather(self, idle: bool) -> tuple[list[dict], list[tuple[str, dict]]]:
-        """Everything new for this agent, oldest first, and the receipts that mark it delivered."""
+    def gather(self, idle: bool) -> list[tuple[str, dict, list[dict]]]:
+        """Everything new for this agent, by where it comes from: the receipt that claims it, and the items."""
         name = self.name
-        items: list[dict] = []
-        receipts: list[tuple[str, dict]] = []
+        out: list[tuple[str, dict, list[dict]]] = []
         seg = segment(self.line)
         pending = self.client.get(f"/api/{seg}/pending", name=name, idle=1 if idle else None)
         if pending:
-            receipts.append((f"/api/{seg}/delivered",
-                             {"name": name, "ids": [m["id"] for m in pending], "listener": self.listener}))
-            items += [_inbox_item(m, self.line) for m in pending]
+            out.append((f"/api/{seg}/delivered", {"name": name, "ids": [m["id"] for m in pending],
+                                                  "listener": self.listener},
+                        [_inbox_item(m, self.line) for m in pending]))
         for c in self.channels:
             pending = self.client.get(f"/api/channels/{c}/pending", name=name)
             if pending:
-                receipts.append((f"/api/channels/{c}/delivered",
-                                 {"name": name, "ids": [m["id"] for m in pending], "listener": self.listener}))
                 # Answers to this agent's own questions come below, wherever they were asked.
-                items += [_channel_item(m, c) for m in pending
-                          if not (m["kind"] == "answer" and m["re"]["sender"] == name)]
+                out.append((f"/api/channels/{c}/delivered", {"name": name, "ids": [m["id"] for m in pending],
+                                                             "listener": self.listener},
+                            [_channel_item(m, c) for m in pending
+                             if not (m["kind"] == "answer" and m["re"]["sender"] == name)]))
         asking = self.client.get("/api/enroll", new=1)  # none unless this is the approver
         if asking:
-            receipts.append(("/api/enroll/told", {"ids": [r["id"] for r in asking]}))
-            items += [request_item(r) for r in asking]
+            out.append(("/api/enroll/told", {"ids": [r["id"] for r in asking], "listener": self.listener},
+                        [request_item(r) for r in asking]))
         agent = f"/api/agents/{quote(name, safe='')}"
         answers = self.client.get(f"{agent}/answers")
         if answers:
-            receipts.append((f"{agent}/answers/delivered",
-                             {"ids": [a["id"] for a in answers], "listener": self.listener}))
-            items += [_answer_item(a) for a in answers]
+            out.append((f"{agent}/answers/delivered", {"ids": [a["id"] for a in answers], "listener": self.listener},
+                        [_answer_item(a) for a in answers]))
         # Always taken: messages sent while agent messages were on still arrive after they go off.
         talk = self.client.get("/api/talk/pending", name=name)
         if talk:
-            receipts.append(("/api/talk/delivered",
-                             {"name": name, "ids": [m["id"] for m in talk], "listener": self.listener}))
-            items += [{"kind": "agent", "from": m["from"], "at": m["at"], "id": m["id"], "text": m["text"]}
-                      for m in talk]
-        items.sort(key=lambda it: it["at"])
-        return items, receipts
+            out.append(("/api/talk/delivered", {"name": name, "ids": [m["id"] for m in talk],
+                                                 "listener": self.listener},
+                        [{"kind": "agent", "from": m["from"], "at": m["at"], "id": m["id"], "text": m["text"]}
+                         for m in talk]))
+        return out
 
     def take(self, idle: bool, ends: bool = False) -> list[dict]:
-        """Everything new for this agent, oldest first, marked delivered. ends: the taker exits once it has printed
-        them, so the owner is shown that nothing listens until another starts."""
-        items, receipts = self.gather(idle)
-        for path, body in receipts:
-            self.client.post(path, {**body, "ends": True} if ends and "listener" in body else body)
-        return items
+        """Everything new for this agent that no other taker of its claimed first, oldest first, marked delivered.
+        ends: the taker exits once it has printed them, so the owner is shown that nothing listens until another
+        starts."""
+        return claim(self.client, self.gather(idle), ends)
+
+
+def claim(client: Client, gathered: list[tuple[str, dict, list[dict]]], ends: bool) -> list[dict]:
+    """Posts each receipt and keeps the items the service says this taker was given: two takers for one agent (two
+    listeners, or a listener and a check) never both hand it the same item."""
+    items = []
+    for path, body, got in gathered:
+        taken = set(client.post(path, {**body, "ends": True} if ends and path != "/api/enroll/told" else body)["taken"])
+        items += [it for it in got if it["id"] in taken]
+    return sorted(items, key=lambda it: it["at"])
 
 
 def handed(owner: str, items: list[dict], how: str) -> str:

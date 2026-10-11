@@ -47,6 +47,11 @@ class Message:
     re: dict | None = None  # the message it replies to: {id, kind, sender, title, thread}
 
 
+def retaken(by: str | None, listener: str | None) -> bool:
+    """Whether a taker asking again is the one that took it first: its receipt went through, but the answer was lost."""
+    return listener is not None and by == listener
+
+
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="microseconds")
 
@@ -82,6 +87,7 @@ class Store:
         self.root = root
         root.mkdir(parents=True, exist_ok=True)
         self._reply_lock = threading.Lock()
+        self._flag_lock = threading.Lock()
         self.index = Index(root)
 
     def _sync(self, msg_id: str) -> None:
@@ -203,9 +209,17 @@ class Store:
         """When the asker was given the answer to its question, and by what."""
         return self._flag(msg_id, "answer_delivered")
 
-    def mark_answer_delivered(self, msg_id: str, listener: str | None) -> None:
-        if self.answer_delivered(msg_id) is None:
-            self._set_flag(msg_id, "answer_delivered", f"{now_iso()} {listener or 'listener not recorded'}")
+    def mark_answer_delivered(self, msg_id: str, listener: str | None) -> bool:
+        """Whether this listener is the one given it: each outcome goes to one taker."""
+        return self._first(msg_id, "answer_delivered", listener)
+
+    def _first(self, msg_id: str, flag: str, listener: str | None) -> bool:
+        with self._flag_lock:
+            was = self._flag(msg_id, flag)
+            if was is None:
+                self._set_flag(msg_id, flag, f"{now_iso()} {listener or 'listener not recorded'}")
+                return True
+            return retaken(was.split(" ", 1)[1], listener)
 
     def set_aside(self, msg_id: str) -> str | None:
         """When the owner set the question aside unanswered. It stays answerable."""
@@ -220,9 +234,8 @@ class Store:
         """When the asker was told its question was set aside, and by what."""
         return self._flag(msg_id, "aside_delivered")
 
-    def mark_aside_delivered(self, msg_id: str, listener: str | None) -> None:
-        if self.aside_delivered(msg_id) is None:
-            self._set_flag(msg_id, "aside_delivered", f"{now_iso()} {listener or 'listener not recorded'}")
+    def mark_aside_delivered(self, msg_id: str, listener: str | None) -> bool:
+        return self._first(msg_id, "aside_delivered", listener)
 
     def delete(self, msg_id: str) -> None:
         """Gone from the app, but every recording and transcript is kept, in deleted/<id>/."""

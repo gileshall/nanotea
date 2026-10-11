@@ -2,8 +2,8 @@
 
 data/channels.json lists them ({name: {created, by, topic}}). Agents' posts are ordinary messages in the
 store, tagged with their channel. What the owner posts lives in data/channel-<name>/messages/<id>/, like an
-inbox's. Delivery is per agent and at least once: data/channel-<name>/listeners.json keeps each agent's
-cursor, the time it first listened here and every item it has been given since.
+inbox's. Delivery is per agent: data/channel-<name>/listeners.json keeps each agent's cursor, the time it first
+listened here, every item it has been given since, and by which of its takers ("by"), so only one hands it over.
 """
 
 import json
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from nanotea.index import Index
 from nanotea.inbox import Folder
-from nanotea.store import ID_PATTERN, now_iso
+from nanotea.store import ID_PATTERN, now_iso, retaken
 
 NAME = r"[a-z0-9][a-z0-9-]{0,39}"
 # An item a listener was given: a post (agent's or the owner's) by id, or the owner's answer to a question.
@@ -60,7 +60,9 @@ class Channel(Folder):
                 self._write(self._listeners, listeners)
             return listeners[agent]
 
-    def mark_delivered(self, agent: str, keys: list[str], listener: str | None) -> None:
+    def mark_delivered(self, agent: str, keys: list[str], listener: str | None) -> list[str]:
+        """The keys this listener is given: those none of the agent's other takers took first. The cursor's "by"
+        names each key's taker."""
         for key in keys:
             if not re.fullmatch(ITEM_KEY, key):
                 raise ValueError(f"bad item id: {key!r}")
@@ -69,8 +71,12 @@ class Channel(Folder):
             listeners = self.listeners()
             if agent not in listeners:
                 raise ChannelError(409, f"{agent!r} has never listened to #{self.name}")
-            done = listeners[agent]["delivered"]
-            done += [k for k in keys if k not in done]
+            done, by = listeners[agent]["delivered"], listeners[agent].setdefault("by", {})
+            taken = [k for k in keys if k not in done or retaken(by.get(k), listener)]
+            for k in keys:
+                if k not in done:
+                    done.append(k)
+                    by[k] = listener
             self._write(self._listeners, listeners)
             for key in keys:
                 path = self._msg_dir(key) / "meta.json" if re.fullmatch(ID_PATTERN, key) else None
@@ -79,6 +85,7 @@ class Channel(Folder):
                     msg["deliveries"].append({"to": agent, "at": at, "by": listener})
                     self._write(path, msg)
                     self._sync(key)
+        return taken
 
 
 class Channels:

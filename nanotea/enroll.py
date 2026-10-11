@@ -5,10 +5,10 @@ that only the asker holds. The approver (an agent the owner chose, nanotea/token
 denies it. The asker then collects its token with the secret: the token is made at that moment and sent to the
 asker alone, so whoever approved never sees it.
 
-enroll.json is {"version": 1, "requests": [{id, kind, name, line, dir, from, had, asked, sha256, state, decided,
-by, reason, told, token}]}. state: pending, approved, denied, collected, expired, replaced (asked again), or failed
-(approved, but the token couldn't be made). A pending request expires after PENDING_S, an approved one not collected
-after APPROVED_S. Closed requests are kept for KEEP_S."""
+enroll.json is {"version": 1, "requests": [{id, kind, name, line, dir, from, had, asked, sha256, state, decided, by,
+reason, told, told_by, token}]}. state: pending, approved, denied, collected, expired, replaced (asked again), or
+failed (approved, but the token couldn't be made). A pending request expires after PENDING_S, an approved one not
+collected after APPROVED_S. Closed requests are kept for KEEP_S."""
 
 import json
 import os
@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from nanotea.config import ConfigError
-from nanotea.store import now_iso
+from nanotea.store import now_iso, retaken
 from nanotea.tokens import KINDS, LINE, TokenBook, TokenError, check_name, digest, same
 
 PENDING_S = 24 * 3600
@@ -107,7 +107,7 @@ class EnrollBook:
             record = {"id": secrets.token_hex(4), "kind": kind, "name": name, "line": line, "dir": where,
                       "from": address, "had": self.tokens.revoked_at(kind, name), "asked": at,
                       "sha256": digest(secret), "state": "pending", "decided": None, "by": None, "reason": None,
-                      "told": None, "token": None}
+                      "told": None, "told_by": None, "token": None}
             gone = {r["id"] for r in mine}
             self._save([{**r, "state": "replaced", "decided": at} if r["id"] in gone else r
                         for r in self._requests] + [record])
@@ -124,16 +124,20 @@ class EnrollBook:
             self._expire()
             return self.public(self._find(ident))
 
-    def told(self, ids: list[str]) -> None:
-        """The approver has been given these."""
+    def told(self, ids: list[str], listener: str | None) -> list[str]:
+        """The approver has been given these; returns those this listener is the one to hand over."""
         at = now_iso()
         with self._lock:
-            self._save([{**r, "told": at} if r["id"] in ids and not r["told"] else r for r in self._requests])
+            taken = [r["id"] for r in self._requests if r["id"] in ids
+                     and (not r["told"] or retaken(r.get("told_by"), listener))]  # told_by: not on older records
+            self._save([{**r, "told": at, "told_by": listener} if r["id"] in ids and not r["told"] else r
+                        for r in self._requests])
+            return taken
 
     def untell(self) -> None:
         """A new approver is given every request still waiting."""
         with self._lock:
-            self._save([{**r, "told": None} for r in self._requests])
+            self._save([{**r, "told": None, "told_by": None} for r in self._requests])
 
     def _find(self, ident) -> dict:
         hit = next((r for r in self._requests if r["id"] == ident), None)

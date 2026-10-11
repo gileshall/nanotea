@@ -308,7 +308,9 @@ agents = { desk = "push", builder = "listen" }
 The owner can change it under Settings > Configuration, Delivery, which restarts the service. Agents hear of a
 change with their next tool call: the result carries `delivery`, the mode and its line of the agreement, which
 replaces the one they started with. In every mode `check` and `wait` still work, and each item is delivered once,
-by whichever takes it first: items handed over by push or listen show who took them (`push hook pid N`,
+by whichever takes it first. A taker claims items before it hands them over and hands over only what the service
+says it was given, so two takers for one agent (two listeners, or a listener and `check`) never both do. Items
+handed over by push or listen show who took them (`push hook pid N`,
 `listen pid N`).
 
 - Push needs `nanotea hook push` as a synchronous `PostToolUse` and `PostToolUseFailure` hook, which `nanotea

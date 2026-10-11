@@ -1,5 +1,6 @@
 """Agents' messages to each other (the tell tool): data/talk/<id>.json, {id, from, to, text, at, delivered_at,
-deliveries}. Delivery is at least once, as with the owner's: pending until the recipient's session marks it."""
+deliveries}. Pending until the recipient marks it delivered; the first taker to mark it is the one that hands it
+over."""
 
 import json
 import os
@@ -8,7 +9,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from nanotea.store import now_iso
+from nanotea.store import now_iso, retaken
 
 TALK_MAX = 4000
 
@@ -50,7 +51,8 @@ class TalkBook:
                            if m["to"].casefold() == name.casefold() and m["delivered_at"] is None),
                           key=lambda m: m["id"])
 
-    def mark_delivered(self, name: str, ids: list[str], listener: str | None) -> None:
+    def mark_delivered(self, name: str, ids: list[str], listener: str | None) -> list[str]:
+        """The ids this listener is given: those no other took first."""
         with self._lock:
             for i in ids:
                 msg = self._msgs.get(i)
@@ -59,12 +61,17 @@ class TalkBook:
                 if msg["to"].casefold() != name.casefold():
                     raise TalkError(409, f"{i} is for {msg['to']!r}, not {name!r}")
             at = now_iso()
+            taken = []
             for i in ids:
                 msg = self._msgs[i]
                 if msg["delivered_at"] is None:
                     msg["delivered_at"] = at
+                    taken.append(i)
+                elif retaken(msg["deliveries"][0]["by"], listener):
+                    taken.append(i)
                 msg["deliveries"].append({"at": at, "by": listener})
                 self._write(msg)
+            return taken
 
     def recent(self, n: int) -> list[dict]:
         """The last n, oldest first."""

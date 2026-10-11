@@ -283,17 +283,15 @@ class Agent:
         w = self.client.get(f"/api/agents/{quote(self.name, safe='')}/waiting", line=segment(self.line))
         return {**w, "total": w["total"] + len(self.local)}
 
-    def gather(self, idle: bool) -> tuple[list[dict], list[tuple[str, dict]]]:
-        """Everything new for this agent, oldest first, and the receipts that mark it delivered."""
-        items, receipts = Mailbox(self.client, self.need(), self.line, self.channels, self.listener).gather(idle)
-        return sorted(self.local + items, key=lambda it: it["at"]), receipts
+    def look(self, idle: bool) -> list[dict]:
+        """Everything new for this agent, oldest first, not taken."""
+        gathered = Mailbox(self.client, self.need(), self.line, self.channels, self.listener).gather(idle)
+        return sorted(self.local + [it for _, _, got in gathered for it in got], key=lambda it: it["at"])
 
     def take(self, idle: bool) -> list[dict]:
-        """Everything new for this agent, oldest first, marked delivered."""
-        items, receipts = self.gather(idle)
-        for path, body in receipts:
-            self.client.post(path, body)
-        self.local = [it for it in self.local if it not in items]
+        """Everything new for this agent, oldest first, marked delivered: what this session was given of it."""
+        items = Mailbox(self.client, self.need(), self.line, self.channels, self.listener).take(idle)
+        items, self.local = sorted(self.local + items, key=lambda it: it["at"]), []
         return items
 
     def can(self, mode: str) -> bool:
@@ -493,7 +491,7 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
         first_event: float | None = None
         while True:
             # Looked at, not taken: what doesn't end the wait stays undelivered until it does.
-            items, _ = await call(agent.gather, True)
+            items = await call(agent.look, True)
             now = time.monotonic()
             if first_event is None and any(it["kind"] == "event" for it in items):
                 first_event = now
@@ -501,7 +499,9 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
                                                    or now - first_event >= EVENT_SETTLE_S)
             if agent.wakes(items) or settled or now - start >= timeout_s:
                 items = await call(agent.take, True)
-                return await result(items=items, timed_out=not items)
+                if items or now - start >= timeout_s:
+                    return await result(items=items, timed_out=not items)
+                first_event = None  # another taker for this agent was given them
             if now - last_progress >= PROGRESS_S:
                 await ctx.report_progress(now - start, timeout_s, "waiting for the owner")
                 last_progress = now

@@ -360,11 +360,17 @@ def _listen(base: str, sender: str, about: str | None, box: str | None, channels
                 batches.append((f"{ch}/delivered", pending, functools.partial(print_channel, channel)))
         if batches and (once or on_line or wakes(base, sender, batches)):
             orphaned(parent)
+            shown = False
             for path, pending, show in batches:
-                show(pending)
-                request(path, {"name": sender, "ids": [m["id"] for m in pending], "listener": listener, "ends": True},
-                        outlast=True)
-            return False
+                # Claimed before printed: of two takers for one agent, only the one given an item prints it.
+                taken = set(request(path, {"name": sender, "ids": [m["id"] for m in pending], "listener": listener,
+                                           "ends": True}, outlast=True)["taken"])
+                if mine := [m for m in pending if m["id"] in taken]:
+                    show(mine)
+                    shown = True
+            if shown:
+                return False
+            print(f"nanotea-tell: another taker for {sender} was given them first", file=sys.stderr)
         if once:
             print("nanotea-tell: nothing new", file=sys.stderr)
             return False

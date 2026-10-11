@@ -3031,11 +3031,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("send a JSON object")
             if ident is None:
-                ids = body.get("ids")
+                ids, listener = body.get("ids"), body.get("listener")
                 if not (isinstance(ids, list) and all(isinstance(i, str) for i in ids)):
                     raise ValueError("send {ids}: the requests given to the approver")
-                self.app.enroll.told(ids)
-                return self._json(200, {"ok": True})
+                if listener is not None and not (isinstance(listener, str) and len(listener) <= 80):
+                    raise ValueError("'listener' must be a short string")
+                return self._json(200, {"ok": True, "taken": self.app.enroll.told(ids, listener)})
             by = "owner" if self.who.kind == "owner" else self.who.name
             request = self.app.enroll.decide(ident, verdict == "approve", by, body.get("reason"))
         except TokenError as err:
@@ -3173,14 +3174,14 @@ class Handler(BaseHTTPRequestHandler):
             if listener is not None and not (isinstance(listener, str) and len(listener) <= 80):
                 raise ValueError("'listener' must be a short string")
             done = ends(body)
-            self.app.talk.mark_delivered(name, ids, listener)
-            if done:
+            taken = self.app.talk.mark_delivered(name, ids, listener)
+            if done and taken:
                 self.app.handed_over(name)
         except TalkError as err:
             return self._json(err.status, {"error": str(err)})
         except (KeyError, TypeError, ValueError) as err:
             return self._json(400, {"error": f"{type(err).__name__}: {err}"})
-        self._json(200, {"ok": True})
+        self._json(200, {"ok": True, "taken": taken})
 
     def _assign_voice(self, raw: bytes) -> None:
         """The owner gives an agent a voice: {agent, voice, take}, as the agent's own --voice would, checked against
@@ -3431,15 +3432,15 @@ class Handler(BaseHTTPRequestHandler):
             if listener is not None and not (isinstance(listener, str) and len(listener) <= 80):
                 raise ValueError("'listener' must be a short string")
             done = ends(body)
-            self.app.channels.get(name).mark_delivered(agent.strip(), ids, listener)
-            if done:
+            taken = self.app.channels.get(name).mark_delivered(agent.strip(), ids, listener)
+            if done and taken:
                 self.app.handed_over(agent.strip())
         except ChannelError as err:
             return self._json(err.status, {"error": str(err)})
         except (KeyError, TypeError, ValueError) as err:
             return self._json(400, {"error": f"{type(err).__name__}: {err}"})
-        log.info("#%s items delivered to %s: %s", name, agent, ", ".join(ids))
-        self._json(200, {"ok": True})
+        log.info("#%s items delivered to %s: %s", name, agent, ", ".join(taken))
+        self._json(200, {"ok": True, "taken": taken})
 
     def _claim(self, box: str, raw: bytes) -> None:
         """Agent opens (claims) or closes (releases) an inbox: {name, about, open}."""
@@ -3561,17 +3562,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(409, {"error": f"{q} is not a question {agent!r} asked"})
                 if i != q and store.set_aside(q) is None:
                     return self._json(409, {"error": f"{q} was not set aside"})
-            for i in ids:
-                if i.startswith("aside-"):
-                    store.mark_aside_delivered(i.removeprefix("aside-"), listener)
-                else:
-                    store.mark_answer_delivered(i, listener)
-            if done:
+            taken = [i for i in ids if (store.mark_aside_delivered(i.removeprefix("aside-"), listener)
+                                        if i.startswith("aside-") else store.mark_answer_delivered(i, listener))]
+            if done and taken:
                 self.app.handed_over(agent)
         except (KeyError, TypeError, ValueError) as err:
             return self._json(400, {"error": f"{type(err).__name__}: {err}"})
-        log.info("answers delivered to %s: %s", agent, ", ".join(ids))
-        self._json(200, {"ok": True})
+        log.info("answers delivered to %s: %s", agent, ", ".join(taken))
+        self._json(200, {"ok": True, "taken": taken})
 
     def _history(self, box: str, query: dict) -> None:
         """The holder's recent inbox messages, newest first, with every delivery: when, to whom, which listener."""
@@ -3615,16 +3613,16 @@ class Handler(BaseHTTPRequestHandler):
             if listener is not None and not (isinstance(listener, str) and len(listener) <= 80):
                 raise ValueError("'listener' must be a short string")
             done = ends(body)
-            self.app.boxes[box].mark_delivered(name, ids, listener)
-            if done:
+            taken = self.app.boxes[box].mark_delivered(name, ids, listener)
+            if done and taken:
                 self.app.handed_over(name)
         except InboxError as err:
             return self._json(err.status, {"error": str(err)})
         except (KeyError, TypeError, ValueError, FileNotFoundError) as err:
             return self._json(400, {"error": f"{type(err).__name__}: {err}"})
         log.info("%s inbox messages delivered to %s (%s): %s", box, name, listener or "listener not recorded",
-                 ", ".join(ids))
-        self._json(200, {"ok": True})
+                 ", ".join(taken))
+        self._json(200, {"ok": True, "taken": taken})
 
     def _owner_file(self, where: str, msg_id: str, basename: str) -> None:
         """A file the owner attached, from an inbox message (its API segment), a channel post ("c/<name>"),
