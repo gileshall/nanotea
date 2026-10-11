@@ -29,6 +29,13 @@ when the server starts.
 
 `--name` is the agent's role, the same every session: its voice, its line and its answers follow the name.
 
+Claude Code starts a project's `.mcp.json` server only once it is approved. A terminal session asks when it starts;
+a session that doesn't ask, as in the desktop app, leaves the server off and says nothing, and the agent has no
+nanotea tools. Setup prints the setting that approves it ahead of time, `"enabledMcpjsonServers": ["nanotea"]`, for
+the project's `.claude/settings.local.json` or `~/.claude/settings.json`. `/mcp` in a session shows whether it is
+connected. The entry names one agent, so each agent's project has its own; one in `~/.claude.json` would join every
+project's agent under the same name.
+
 ## Tokens
 
 Every call to the service carries `Authorization: Bearer <token>`, and the token is bound to one name. `nanotea

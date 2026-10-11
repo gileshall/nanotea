@@ -68,11 +68,19 @@ def claude(a: Agent) -> str:
     stop = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": a.hook("stop", "--harness", "claude"),
                                            "timeout": 60}]}]}}
     return f"""\
-MCP server: .mcp.json in the project (or ~/.claude.json for every project):
+MCP server: .mcp.json in the agent's project. It names the agent, so each agent's project has its own.
 
 {_json({"mcpServers": {"nanotea": _std(a)}})}
 
 or: claude mcp add nanotea --scope project {a.env_args("--env")} -- {shlex.join([a.exe, *a.args])}
+
+Claude Code starts a project's .mcp.json server only once it is approved. A terminal session asks when it starts;
+a session that doesn't ask, as in the desktop app, leaves it off and says nothing. To approve it ahead of time:
+
+{_json({"enabledMcpjsonServers": ["nanotea"]})}
+
+in .claude/settings.local.json in the project, or ~/.claude/settings.json for every project. /mcp in a session
+shows whether it is connected.
 
 Wake hook: .claude/settings.json (or ~/.claude/settings.json). When the agent ends its turn this runs in the
 background and wakes it when {{owner}} writes. The timeout is above the hook's own 23 hour limit, because Claude
