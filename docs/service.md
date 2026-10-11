@@ -18,9 +18,8 @@ line. `voices.json` maps senders to voices; `reply_key` is the pairing key; `hos
 settings (only once one is changed; until then the defaults). `groups.json` is the board's groups and
 `board-hidden.json` the names kept off it. `presence.json` keeps who is held at a prompt and whose listener handed it messages, over a restart; `unheard.json`, what the owner was last told waits unheard on each line. `rules.json` is the standing rules and
 `rules-log.jsonl` every rule added or removed. `talk/<id>.json` is one agent's message to another, with when it was
-delivered. `nanotea.db` is an index, rebuilt from the files at each start; the files are the record. Agent sessions
-and who is held at a permission prompt are kept in memory: MCP servers register their sessions again after a
-restart.
+delivered. `nanotea.db` is an index, rebuilt from the files at each start; the files are the record. Agent sessions are
+kept in memory: MCP servers register their sessions again after a restart.
 
 ## Upgrading
 
@@ -85,7 +84,7 @@ nanotea token revoke 1a2b3c4d
 
 The API: `GET /api/tokens[?revoked=1]`, `POST /api/tokens` (`{kind, name, line?, replace?}`, answers with the secret once), `POST /api/tokens/<id>/revoke`, `POST /api/approver` (`{token: id or null}`). All need the pairing key.
 
-Requests: `POST /api/enroll` (`{kind, name, line?, dir?}`, no credential, from this machine only; answers `{request, secret, approver}`), `POST /api/enroll/<id>/collect` (`{secret}`; answers `{request, token}`, the token once approved and only then). The owner or the approver: `GET /api/enroll`, `POST /api/enroll/<id>/approve` and `/deny` (`{reason?}`). The approver: `GET /api/enroll?new=1` and `POST /api/enroll/told` (`{ids}`). Requests are kept in `data/enroll.json` (mode 0600), with only a hash of each secret.
+Requests: `POST /api/enroll` (`{kind, name, line?, dir?}`, no credential, from this machine only; answers `{request, secret, approver}`), `POST /api/enroll/<id>/collect` (`{secret}`; answers `{request, token}`, the token once approved and only then). The owner or the approver: `GET /api/enroll`, `POST /api/enroll/<id>/approve` and `/deny` (`{reason?}`). The approver: `GET /api/enroll?new=1` and `POST /api/enroll/told` (`{ids, listener?}`; answers `{ok, taken}`, as a delivery receipt does). Requests are kept in `data/enroll.json` (mode 0600), with only a hash of each secret.
 
 The commands that act as the owner (`nanotea token`, `nanotea sop`) read the key from `data/reply_key`, or from the file `NANOTEA_KEY_FILE` names, which must not be readable by other users. On another machine, copy the key to a file and point `NANOTEA_KEY_FILE` at it.
 
@@ -137,7 +136,7 @@ docker compose exec nanotea nanotea pair-link   # open the link once on each pho
 - Kokoro inside the service: build with `NANOTEA_KOKORO=1` to add its package, put `backend = "kokoro"` in `[tts]`, and fetch the model files once into the `nanotea-cache` volume with `docker compose run --rm nanotea kokoro download`, before `up`. The image never contains them, and the service will not start without them ([plugins.md](plugins.md#the-two-kokoro-voices)).
 - Models: whisper downloads its model into the `nanotea-cache` volume on first use. The example uses `small`; larger ones are slow on CPU.
 - Data: the `nanotea-data` volume at `/data`. `docker compose down` keeps it; `down -v` deletes it. Set `NANOTEA_DATA=/an/absolute/path` to use a host directory instead (mounted at the same path inside), set `data_dir` in the config to that path, and set `NANOTEA_UID` and `NANOTEA_GID` if you are not uid 1000. A volume starts empty and unreadable from the host; a host directory lets agents open the recordings and attachments they are told about, because they get paths.
-- Update: `git poll && docker compose up -d --build`.
+- Update: `git pull && docker compose up -d --build`.
 
 ### Agents on the host
 
@@ -185,11 +184,15 @@ A proxy on another machine or in another container needs the port published to i
 - Heard: playing 90% of a message's audio marks it heard and seen.
 - Held at a permission prompt: with Notify when held above 0 in Settings, once per hold when an agent stays held
   that many minutes.
+- Unheard: with Notify when unheard above 0 (`unheard_push_min`), once per stall when the owner's oldest message on
+  a line has waited that many minutes with nothing listening, busy or held for it; and once when an agent stops
+  listening after its listener handed it messages. What was told is kept in `data/unheard.json`. Quiet hours put
+  these off until they end, and a muted agent's line never sends them.
 - A conversation page that loses its pairing (the key changed, or the cookie went) stops updating and says to
   open the pairing link again.
 - Locked phone: audio keeps playing with the screen locked, with lock screen controls. A conversation page never reloads; a message playing keeps playing while the page updates. While recording, the page keeps the screen on.
-- Attachments: every composer has Attach: pictures, PDFs, video (mp4, mov, m4v) and audio (wav, flac, aiff, caf, mp3, m4a, aac, ogg, opus, webm). Pasting a file into the text box, or dropping one anywhere on the page, attaches it too. Files are kept byte for byte as sent, and audio plays in the thread with a link to the file as sent. Uploads go to disk as they arrive, up to `[audio] max_upload_mb`; the proxy must let that much through (nginx `client_max_body_size`; Traefik's buffering middleware, if used). Agents get each file's path, type, size and name with the message (MCP `files`; `[file]` lines from `nanotea-tell`).
-- Emoji reactions both ways. The owner taps the smiley under an agent message; on a question still waiting the emoji is the answer, otherwise it goes to the sender's inbox if it holds one, or to the main inbox. Agents react with the `react` tool, or `nanotea-tell --from <holder> --react <id> <emoji> [--inbox NAME]`.
+- Attachments: every composer has Attach: pictures, PDFs, video (mp4, mov, m4v) and audio (wav, flac, aiff, caf, mp3, m4a, aac, ogg, opus, webm). Pasting a file into the text box, or dropping one anywhere on the page, attaches it too. Files are kept byte for byte as sent, and audio plays in the thread with a link that saves the file as sent (`?save=1` on the file's URL sends `Content-Disposition: attachment`, which an installed iPhone app needs to save rather than play). Agents' audio attachments have the same link. Uploads go to disk as they arrive, up to `[audio] max_upload_mb`; the proxy must let that much through (nginx `client_max_body_size`; Traefik's buffering middleware, if used). Agents get each file's path, type, size and name with the message (MCP `files`; `[file]` lines from `nanotea-tell`).
+- Emoji reactions both ways. The owner taps the smiley under an agent message; on a question still waiting the emoji is the answer, otherwise it goes to the sender's line if it holds one, or to the main line when `[app] root_agent` is on. With it off, a reaction to an agent with no line is refused, and the app says why. Agents react with the `react` tool, or `nanotea-tell --from <holder> --react <id> <emoji> [--inbox NAME]`.
 
 ## Config
 

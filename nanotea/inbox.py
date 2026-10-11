@@ -1,5 +1,6 @@
-"""The owner's inbox for the main agent: the owner writes any time, or replies to any agent's message through it;
-the main agent picks messages up with nanotea-tell --listen. One agent holds the inbox at a time.
+"""A line: the owner's inbox for one agent, its direct line, or the main inbox when [app] root_agent is on. The owner
+writes any time, or replies to an agent's message through it; the holder picks messages up with nanotea-tell
+--listen, nanotea listen, or check. One agent holds a line at a time.
 
 data/inbox/inbox.json, and messages/<id>/meta.json plus any audio. Messages stay pending until
 the holder's listener marks them delivered; of two takers, the first to mark one hands it over.

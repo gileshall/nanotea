@@ -159,7 +159,8 @@ INBOX_SEGMENT = {"main": "inbox"}
 
 
 def inbox_segment(box: str) -> str:
-    """The main inbox, or a direct line to one agent (dm-<name>), made when it first claims it."""
+    """The main inbox (with [app] root_agent on), or a direct line to one agent (dm-<name>), made when it first claims
+    it."""
     if box in INBOX_SEGMENT:
         return INBOX_SEGMENT[box]
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", box):
@@ -415,9 +416,9 @@ def arrange(base: str, sender: str, spec: str) -> None:
 
 def board(base: str, stale: int | None) -> None:
     """The status board, grouped as the owner's sidebar: each line's agent, whether it counts as connected and why (a
-    listener holding it, responding, typing, or a listener poll within the hour) or when it was last seen, and its
-    beacon. Then beacons with no line. stale: only the agents whose beacon is older than that many minutes or
-    missing: connected ones first, each oldest first."""
+    listener holding it, responding, busy or away after a hand-over, typing, or a listener poll within the hour) or
+    when it was last seen, and its beacon. Then beacons with no line. stale: only the agents whose beacon is older
+    than that many minutes or missing: connected ones first, each oldest first."""
     out = request(f"{base}/api/board")
     now = datetime.fromisoformat(out["now"])
 
@@ -529,7 +530,9 @@ def main() -> None:
                         "[[video N]] or [[pdf N]] in the text where the Nth --attach goes, or it goes at the end")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--ask", action="store_true",
-                      help=f"wait for {OWNER}'s reply and print it; can take hours, so run it in the background")
+                      help=f"wait for {OWNER}'s reply and print it, or for {OWNER} to write in your line instead, "
+                           "which ends the wait with the question still open; can take hours, so run it in the "
+                           "background")
     mode.add_argument("--wait", action="store_true", help="wait until the message is delivered")
     p.add_argument("--raw", action="store_true",
                    help=f"with --ask: ask {OWNER} to record the answer raw, the microphone's processing off (a "
@@ -545,7 +548,7 @@ def main() -> None:
     mode.add_argument("--listen", action="store_true",
                       help=f"wait for {OWNER}'s messages in an inbox you hold (--inbox) and new posts in channels "
                            "(--channel); prints them and exits, so run it in the background and again after each "
-                           "batch. With neither, holds the main inbox")
+                           "batch. With neither, holds the main inbox, which needs [app] root_agent on")
     mode.add_argument("--check", action="store_true",
                       help=f"take what is new for you now, as --listen would, print it and exit without waiting: "
                            f"{OWNER}'s messages in your inbox (--inbox) and new posts in channels (--channel). "
@@ -588,7 +591,8 @@ def main() -> None:
                         "you wait (they must also be on in Settings). Only whoever starts the listener can give "
                         "this. A command's result is printed with the next batch and doesn't end the wait")
     p.add_argument("--inbox", metavar="NAME",
-                   help="with --listen, --close-inbox, --history, --react, or --event: main (the default), or any other "
+                   help="with --listen, --close-inbox, --history, --react, or --event: main (the default, with [app] "
+                        "root_agent on), or any other "
                         f"name (lowercase, digits, dashes) for your own direct line to {OWNER}, opened by your first "
                         "--listen")
     p.add_argument("--re", metavar="ID",

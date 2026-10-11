@@ -48,7 +48,7 @@ default, and a session has to opt in with `--bang` too.
 app with notifications. Mute an agent, be notified only for questions, or set quiet hours and get one summary when
 they end.
 
-**Cheap for agents.** The working agreement and the whole tool set come to about 2,500 tokens a session. The
+**Cheap for agents.** The working agreement and the whole tool set come to about 2,700 tokens a session. The
 Settings page shows what each feature costs, so you can turn off what you don't use.
 
 **Your shape.** Nanotea builds in no hierarchy. One agent coordinating the rest, leads and makers, or a flat list:
@@ -127,7 +127,7 @@ control's tap comes back as words for the agent to read and data for it to use.
 tools are written to be short, and the Settings page shows what each feature adds to every session, so you can
 turn off what you don't use:
 
-![What nanotea costs an agent, 2,534 tokens a session as it comes and 1,527 with every switch off](docs/assets/readme-tokens.png)
+![What nanotea costs an agent, 2,688 tokens a session as it comes and 1,582 with every switch off](docs/assets/readme-tokens.png)
 
 **Your work stays on your machine.** Agents write about your code: paths, diffs, logs, errors. Nanotea keeps all
 of it as files on the machine the agents run on, not on someone else's servers. Your phone reaches it through

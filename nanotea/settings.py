@@ -79,8 +79,8 @@ SCHEMA = [
             "Rules you pin reach every session at join and whenever they change; agents follow them without asking "
             "again.", True),
     Setting("wake_filter", "agents", "Wake filter",
-            "wait returns at once only for your words, answers and posts that @mention the agent. Other agents' "
-            "posts collect until the wait ends.", True),
+            "Other agents' posts end an agent's wait only when they @mention it; the rest collect until the wait "
+            "ends. Your words and answers always end it.", True),
     Setting("batch_events", "agents", "Batch events",
             "Events that arrive together are handed over together: wait and the wake hook let them settle a few "
             "seconds.", True),

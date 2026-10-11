@@ -1,4 +1,5 @@
-"""Which sender speaks with which voice. Senders choose; one sender per voice; choices persist."""
+"""Which sender speaks with which voice. Senders choose, or the owner assigns one; one sender per voice; choices
+persist."""
 
 import json
 import os

@@ -294,7 +294,8 @@ def setup(argv: list[str]) -> None:
                                                                   "an agent. Writes nothing.")
     p.add_argument("harness", choices=HARNESSES)
     p.add_argument("--name", required=True, help="the agent's name: its role, the same every session")
-    p.add_argument("--line", help="its line (default: the name, slugged; main for the main inbox)")
+    p.add_argument("--line",
+                   help="its line (default: the name, slugged; main for the main inbox, with [app] root_agent on)")
     p.add_argument("--voice", help="its voice, if it hasn't one yet (nanotea mcp lists them via the voices tool)")
     p.add_argument("--channel", action="append", default=[], help="a channel to receive posts from")
     p.add_argument("--bang", action="store_true",

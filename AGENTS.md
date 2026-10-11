@@ -59,7 +59,9 @@ owner's recording --drafts--> server.py --> worker.Transcriber (stt.py) --> deli
 | `server.py` | the HTTP service (stdlib `ThreadingHTTPServer`, no framework): routes, the owner's and agents' APIs, `App` |
 | `pages.py` | every page: Python strings of HTML, CSS and inline JS, including the recorder |
 | `mcp_server.py` | one MCP server per agent session, over stdio; the tools and what each returns |
-| `mailbox.py` | what is new for one agent, taken once: shared by check and wait, the push hook and `nanotea listen` |
+| `mailbox.py` | what is new for one agent, claimed so one taker hands it over: shared by check and wait, the push hook and `nanotea listen`; and the rule for what ends a wait |
+| `client.py` | the agents' side of the HTTP API: the token, errors that say what to do, riding out a restart |
+| `voices.py` | which sender speaks with which voice, chosen by the agent or assigned by the owner |
 | `delivery.py` | `[delivery]`: each agent's mode, poll, push or listen |
 | `relay.py` | `nanotea mcp`: runs `mcp_server.py` as a child and starts it again on new code after an upgrade |
 | `version.py` | the code's version, a hash of the package; sent on every response, so long-lived clients hand over |

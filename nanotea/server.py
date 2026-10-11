@@ -861,13 +861,16 @@ class App:
         """Notes for lines where the owner's oldest waiting message has waited unheard_push_min and nothing is
         listening for it, working on its last hand-over, or held (which notifies on its own); and for agents away
         that long since a listener handed them items. One a stall: what was told of is kept in data/unheard.json,
-        so a restart doesn't tell again."""
+        so a restart doesn't tell again. Quiet hours put it off until they end; a muted agent's line never tells."""
         after = self.settings.get()["unheard_push_min"]
-        if not after:
+        if not after or self.hush.quiet_now(now):
             return []
+        muted = {n.casefold() for n in self.hush.get()["muted"]}
         told = json.loads(self.unheard_path.read_text()) if self.unheard_path.exists() else {}
         notes = []
         for box, inbox in list(self.boxes.items()):
+            if (inbox.info()["holder"] or "").casefold() in muted:
+                continue
             away = self.away(box)
             if (away and told.get(f"away:{box}") != away
                     and (now - datetime.fromisoformat(away)).total_seconds() >= after * 60):
@@ -1008,7 +1011,8 @@ class App:
         """channels: rows of path, name, role, unread, listening, and typing (agents typing there). groups:
         [{name, rows}], a row for each direct line and for each agent with direct messages and no line: path,
         name, role, who, agent (its holder or sender; None for a line nobody holds), unread, listening, away (since
-        when its listener handed it messages and exited, with none back; or None), status,
+        when its listener handed it messages and exited, with none back; or None), busy (it handed over moments
+        ago), status,
         typing (its holder or nobody), responding, listened (its last listener poll, or None), connected, and
         seen (for one not connected, when it was last seen: listened, wrote, or set its status; or None),
         session ({since, count} of its open MCP sessions, or None) and held ({at, what} while it is at a
@@ -2269,7 +2273,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _owner_reacts(self, msg_id: str, raw: bytes) -> None:
         """The owner reacts to an agent's message. On a question still waiting, the emoji is the answer;
-        otherwise it goes to the inbox of the sender (if it holds one) or the main inbox, as a reaction."""
+        otherwise it goes to the sender's line, or the main line if there is one, as a reaction."""
         try:
             body = json.loads(raw)
             emoji, on = _emoji(body["emoji"]), body.get("on", True)

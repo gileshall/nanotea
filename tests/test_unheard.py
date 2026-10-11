@@ -55,6 +55,15 @@ class Unheard(unittest.TestCase):
         self.app.handed["wren"] = (time.monotonic() - 1, self.at.isoformat())  # busy again: nothing to tell
         self.assertEqual(self.app.check_unheard(self.at + timedelta(minutes=5)), [])
 
+    def test_quiet_hours_put_it_off_and_a_mute_stops_it(self):
+        later = self.at + timedelta(minutes=10)
+        self.app.hush.change({"quiet": {"start": f"{later:%H}:00", "end": f"{(later + timedelta(hours=1)):%H}:00"}})
+        self.assertEqual(self.app.check_unheard(later), [])
+        self.app.hush.change({"quiet": None, "muted": ["wren"]})
+        self.assertEqual(self.app.check_unheard(later), [])
+        self.app.hush.change({"muted": []})
+        self.assertEqual([n.title for n in self.app.check_unheard(later)], ["Wren hasn't picked up your message"])
+
     def test_off_at_zero(self):
         self.app.settings.change({"unheard_push_min": 0})
         self.assertEqual(self.app.check_unheard(self.at + timedelta(hours=5)), [])

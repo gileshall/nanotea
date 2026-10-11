@@ -276,8 +276,8 @@ class Agent:
         return [{"id": r["id"], "text": r["text"], "for": r["for"]} for r in out["rules"]]
 
     def waiting(self) -> dict:
-        """The owner's messages on this line, answers to this agent's questions, and agents' messages to it,
-        ready but not taken; and the version of its rules."""
+        """The owner's messages on this line, answers to this agent's questions, agents' messages to it, and what in
+        its channels would end a wait, ready but not taken; and the version of its rules."""
         if self.name is None:
             return {"total": len(self.local), "rules_v": None}
         w = self.client.get(f"/api/agents/{quote(self.name, safe='')}/waiting", line=segment(self.line))
@@ -431,7 +431,7 @@ def make(cfg: dict, agent: Agent, preset: argparse.Namespace) -> MCPServer:
         """Say who you are for this session and open your direct line to the owner. name: your role, the same
         every session (e.g. "builder"). voice: a voice id from voices, needed once before your first send.
         about: what you are working on, shown to the owner. line: the line to hold, by default your name;
-        "main" is the shared main inbox. channels: channels to receive posts from (see channels)."""
+        "main" is the shared main inbox, if there is one. channels: channels to receive posts from (see channels)."""
         out = await call(agent.join, name, line, voice, about, channels or [])
         return await result(**out)
 

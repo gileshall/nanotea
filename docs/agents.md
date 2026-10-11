@@ -82,7 +82,8 @@ is refused, naming the first one's process. With it off, two sessions under one 
 whichever checks first gets each message.
 
 The owner sees, under each agent's name, whether anyone is there to pick up what they send: listening now, held
-at a permission prompt, a session open (and when it last checked), or no session open. For an open session in
+at a permission prompt, busy (its listener handed it messages moments ago), away (busy for over two minutes with
+no listener back), a session open (and when it last checked), or no session open. For an open session in
 push mode it says when the push hook last ran, or that it hasn't since the service started; in listen mode, that
 no `nanotea listen` runs. Either means nothing will hand the owner's messages over until the agent checks.
 
@@ -146,7 +147,7 @@ what the owner sends until told to stop.
 | Tool | Does |
 |---|---|
 | `join(name, voice?, about?, line?, channels?)` | Says who the agent is and opens its line. `line` defaults to the name; `main` is the shared main inbox, with `[app] root_agent` on. An agent holds one line: joining another while it holds one is refused until it releases that one. |
-| `send(text, title?, channel?, attach?, control?, re?)` | A message to the owner, or a post in a channel. `attach`: paths of audio, images, video or PDFs, placed with `[[audio N]]`, `[[image N]]`, `[[video N]]` or `[[pdf N]]`; audio plays in the voice, the rest shows on the page. `control`: something to tap (below). `re`: the id of the message this answers (below). |
+| `send(text, title?, channel?, attach?, control?, re?)` | A message to the owner, or a post in a channel. `attach`: paths of audio, images, video or PDFs, placed with `[[audio N]]`, `[[image N]]`, `[[video N]]` or `[[pdf N]]`; audio plays in the voice, the rest shows on the page. `control`: something to tap (below). `re`: the id of the message this answers (below). Returns `{id, url}`, and `note` when your voice is one the voice engine doesn't have. |
 | `ask(question, title?, channel?, raw?, control?, re?)` | A question; returns its id at once. The answer arrives as kind `answer`. `raw`: ask for the answer recorded raw (below). `control`: the owner can answer with a tap. |
 | `check()` | Everything new, without waiting. Each item is delivered once. |
 | `wait(timeout_s?)` | Waits for something new, up to `timeout_s` (default 50, set by `--wait-s`; at most 3600). Says the agent is idle. |
@@ -311,7 +312,9 @@ The owner can change it under Settings > Configuration, Delivery, which restarts
 change with their next tool call: the result carries `delivery`, the mode and its line of the agreement, which
 replaces the one they started with. In every mode `check` and `wait` still work, and each item is delivered once,
 by whichever takes it first. A taker claims items before it hands them over and hands over only what the service
-says it was given, so two takers for one agent (two listeners, or a listener and `check`) never both do. Items
+says it was given, so two takers for one agent (two listeners, or a listener and `check`) never both do. Every
+delivered receipt (`POST .../delivered`, for a line, a direct line or a channel) answers `{ok, taken}`, the ids that
+taker won. Items
 handed over by push or listen show who took them (`push hook pid N`,
 `listen pid N`).
 
@@ -349,7 +352,7 @@ service follow it at once.
 | `held` | on | Agents held at a permission prompt are shown. |
 | `bang` | off | The owner's `!command` on an agent's direct line runs in that agent's session, if the session was started with `--bang`. Turned on with `nanotea bang on` on the service's machine; off from anywhere. Costs about 60 tokens of agreement a session, and up to about 15,000 tokens for a command whose output fills the cap. See [bang commands](#bang-commands). |
 | `held_push_min` | 0 | Notify the owner after an agent is held this many minutes; 0 never. |
-| `unheard_push_min` | 10 | Notify the owner once a message of theirs has waited this many minutes on a line whose agent isn't listening, busy with what it was handed, or held, and once an agent has gone that long without listening after its listener handed it messages; once per stall, 0 never. |
+| `unheard_push_min` | 10 | Notify the owner once a message of theirs has waited this many minutes on a line whose agent isn't listening, busy with what it was handed, or held, and once an agent has gone that long without listening after its listener handed it messages; once per stall, 0 never. Quiet hours put it off; a muted agent's line never notifies. |
 | `agent_messages` | `off` | `off`: no `tell`. `shown`: agents write to each other and the owner reads it under Agent talk. `hidden`: they write to each other unseen. |
 | `tools` | all on | `react`, `status`, `typing`, `channels`, `board`, `history`, `controls`, `thread`, each on or off. |
 | `thread_view` | `linear` | How the owner's conversation and channel pages draw replies: `linear` keeps time order, each reply quoting what it answers; `grouped` folds replies under their thread's first message. Agents see no difference. |

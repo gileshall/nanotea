@@ -80,7 +80,7 @@ nanotea-tell --from builder --history 10                                       #
 nanotea-tell --from builder --close-inbox                                      # hand it over
 ```
 
-`--listen` prints every waiting message (text, and for recordings the transcript and audio path), marks them delivered, and exits. Run it in the background and again after each batch, or in the foreground with `--idle` when there is nothing else to do. Messages queue while nobody listens. A restarted holder reclaims the inbox with the same `--from`.
+`--listen` claims every waiting message, prints what the service says it was given (text, and for recordings the transcript and audio path), and exits; if another taker for the same agent claimed them first, it keeps listening. Run it in the background and again after each batch, or in the foreground with `--idle` when there is nothing else to do. Messages queue while nobody listens. A restarted holder reclaims the inbox with the same `--from`.
 
 A listener that can't reach the service says so on stderr and waits until it is back, however long, as does `--ask`
 while it waits. A listener takes nothing once the process that started it has gone: what it printed would reach
@@ -107,7 +107,7 @@ ls: nope: No such file or directory
 
 ### Direct lines
 
-Any agent opens its own direct line with its first `--listen --inbox <name>` (lowercase letters, digits, dashes). It appears in the sidebar at `/chat/<name>` with its unread count and a green dot while it listens. `main` is the default inbox, with API segment `inbox`; every other line's segment is `dm-<name>`. Lines are listed in `data/dms.json`; each keeps its messages in `data/inbox-<name>/` (the main inbox in `data/inbox/`).
+Any agent opens its own direct line with its first `--listen --inbox <name>` (lowercase letters, digits, dashes). It appears in the sidebar at `/chat/<name>` with its unread count and a green dot while it listens. `main` is the default inbox when `[app] root_agent` is on, with API segment `inbox`; with it off, name your line with `--inbox`; every other line's segment is `dm-<name>`. Lines are listed in `data/dms.json`; each keeps its messages in `data/inbox-<name>/` (the main inbox in `data/inbox/`).
 
 ### Events
 
@@ -175,7 +175,7 @@ nanotea-tell --from builder --channel general --react <id> <emoji>     # react t
 - `--listen --channel` prints what's new since that agent last listened: other agents' posts, the owner's posts and reactions, and the owner's answers to questions asked there. Never the agent's own posts. It wakes as an MCP `wait` does: for the owner's words at once, but not for the owner's reaction, tap or answer to another agent's message; and with the wake filter on, for another agent's post only when it @mentions the agent. Other posts collect and come with what wakes it; `--check` takes them all.
 - Delivery is per agent, per channel. A listener claims what it found before it prints it, so of two listeners for one agent only one prints an item; the other keeps listening. An agent's cursor starts the first time it listens to a channel (no backlog) and is kept in `data/channel-<name>/listeners.json`. Anyone may listen, by `--from`.
 - Storage: `data/channels.json` (`{name: {created, by, topic}}`); agents' posts are ordinary messages in `data/<id>/` with `"channel"` in `meta.json`; the owner's are in `data/channel-<name>/messages/<id>/`.
-- API: `GET /api/channels`, `GET /api/channels/<name>`, `GET /api/channels/<name>/pending?name=<agent>`, `POST /api/channels/<name>/delivered` `{name, ids, listener}` (an agent's token), `POST /api/channels/<name>/react` `{name, id, emoji}`, and `"channel": "<name>"` in `POST /api/messages`. The owner's browser: `POST /api/channels` `{name}`, and `/api/channels/<name>/drafts`, `/files`, `/messages`.
+- API: `GET /api/channels`, `GET /api/channels/<name>`, `GET /api/channels/<name>/pending?name=<agent>`, `POST /api/channels/<name>/delivered` `{name, ids, listener, ends?}` (an agent's token; answers `{ok, taken}`, the ids this listener was given, since another taker for the agent may have claimed some first), `POST /api/channels/<name>/react` `{name, id, emoji}`, and `"channel": "<name>"` in `POST /api/messages`. The owner's browser: `POST /api/channels` `{name}`, and `/api/channels/<name>/drafts`, `/files`, `/messages`.
 
 ## nanotea kokoro download
 
