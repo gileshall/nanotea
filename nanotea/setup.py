@@ -72,7 +72,7 @@ MCP server: .mcp.json in the project (or ~/.claude.json for every project):
 
 {_json({"mcpServers": {"nanotea": _std(a)}})}
 
-or: claude mcp add --scope project {a.env_args("--env")} nanotea -- {shlex.join([a.exe, *a.args])}
+or: claude mcp add nanotea --scope project {a.env_args("--env")} -- {shlex.join([a.exe, *a.args])}
 
 Wake hook: .claude/settings.json (or ~/.claude/settings.json). When the agent ends its turn this runs in the
 background and wakes it when {{owner}} writes. The timeout is above the hook's own 23 hour limit, because Claude
@@ -154,7 +154,7 @@ MCP server: .gemini/settings.json (or ~/.gemini/settings.json). Gemini allows a 
 
 {_json({"mcpServers": {"nanotea": _std(a, timeout=600000)}})}
 
-or: gemini mcp add -s project {a.env_args("-e")} --timeout 600000 nanotea {shlex.join([a.exe, *a.args])}
+or: gemini mcp add nanotea -s project {a.env_args("-e")} --timeout 600000 -- {shlex.join([a.exe, *a.args])}
 
 AfterAgent hook, in the same settings.json: if something of {{owner}}'s is waiting when the agent finishes, it
 goes on and checks it. Unverified: the matcher AfterAgent expects.

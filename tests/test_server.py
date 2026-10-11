@@ -357,6 +357,13 @@ class Service(Tokens, unittest.TestCase):
                                        run("setup", "codex", "--name", "builder"), re.S | re.M)[0])
         self.assertEqual(toml["mcp_servers"]["nanotea"]["args"], ["mcp", "--name", "builder", "--harness", "codex"])
         self.assertEqual(toml["mcp_servers"]["nanotea"]["env"]["NANOTEA_CONFIG"], str(self.config.resolve()))
+        # The CLIs' env flags take several values, so the server's name goes before them, the command after --.
+        for harness in ("claude", "codex", "gemini"):
+            with self.subTest(one_line=harness):
+                line = re.search(rf"^or: ({harness} mcp add .*)$", run("setup", harness, "--name", "builder"), re.M)[1]
+                words = shlex.split(line)
+                self.assertEqual(words[3], "nanotea", line)
+                self.assertEqual(words[words.index("--") + 1:], [exe, "mcp", "--name", "builder", "--harness", harness])
         out = run("sop", "--name", "builder", "--idle", "wait")
         self.assertTrue(out.startswith("## Nanotea\n\nNanotea connects you to Robin"))
         self.assertIn('You are joined as "builder"', out)
