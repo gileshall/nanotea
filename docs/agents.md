@@ -82,7 +82,9 @@ is refused, naming the first one's process. With it off, two sessions under one 
 whichever checks first gets each message.
 
 The owner sees, under each agent's name, whether anyone is there to pick up what they send: listening now, held
-at a permission prompt, a session open (and when it last checked), or no session open.
+at a permission prompt, a session open (and when it last checked), or no session open. For an open session in
+push mode it says when the push hook last ran, or that it hasn't since the service started; in listen mode, that
+no `nanotea listen` runs. Either means nothing will hand the owner's messages over until the agent checks.
 
 ## Permission prompts
 

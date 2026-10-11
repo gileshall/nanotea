@@ -62,7 +62,7 @@ class Settings(unittest.TestCase):
 
 class Modes(Case):
     PORT_OFFSET = 22
-    EXTRA = '\n[delivery]\nagents = { Pusher = "push", Lister = "listen", Odd = "push" }\n'
+    EXTRA = '\n[delivery]\nagents = { Pusher = "push", Lister = "listen", Odd = "push", Hookless = "push", Unheard = "listen" }\n'
 
     def run_nanotea(self, *args, stdin="{}"):
         return subprocess.run([sys.executable, "-m", "nanotea", *args], cwd=self.tmp.name, env=self.env,
@@ -188,6 +188,18 @@ class Modes(Case):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("only once", r.stdout)
         self.assertIn("another taker for Pair was given them first", r.stderr)
+
+    def test_the_line_says_when_push_or_listen_isnt_handing_over(self):
+        self.open("Hookless")
+        page = self.call("GET", "/chat/hookless")[1]
+        self.assertIn("its delivery is push, and its push hook hasn&#x27;t run since the service started", page)
+        r = self.run_nanotea("hook", "push", "--name", "Hookless", stdin=json.dumps(PUSH))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("its delivery is push, and its push hook last ran just now", self.call("GET", "/chat/hookless")[1])
+        self.open("Unheard")
+        self.assertIn("its delivery is listen, and no nanotea listen runs for it", self.call("GET", "/chat/unheard")[1])
+        self.open("Plain")
+        self.assertNotIn("its delivery is", self.call("GET", "/chat/plain")[1])
 
     def test_push_hands_over_after_a_tool_call_only_in_push_mode(self):
         self.open("Plain")

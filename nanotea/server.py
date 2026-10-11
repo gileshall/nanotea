@@ -415,6 +415,7 @@ class App:
         self.escalator = (Escalator(self.store, built["notify_escalate"],
                                     ncfg["escalate_after_min"], self.note_for, self.hush) if ncfg["escalate"] else None)
         self.idle_at = {box: None for box in self.boxes}  # when each holder last waited with idle=1
+        self.pushed: dict[str, str] = {}  # casefolded agent -> when its push hook last ran, since this start
         self.typing: dict[str, dict[str, float]] = {}  # an inbox, or "#channel" -> agent -> monotonic time
         self.typing_lock = threading.Lock()
         self.last_listen = {box: 0.0 for box in self.boxes}  # monotonic time of each holder's last poll
@@ -756,8 +757,20 @@ class App:
                             "hasn't listened again; yours wait until it does")
         if self.open_sessions(holder):
             last = self.listened.all().get(holder)
-            return "open", ("session open, " + (f"last checked {pages.ago(last)}" if last else "hasn't checked yet"))
+            return "open", ("session open, " + (f"last checked {pages.ago(last)}" if last else "hasn't checked yet")
+                            + self.not_handing(holder))
         return "closed", "no session open; messages wait until it checks"
+
+    def not_handing(self, name: str) -> str:
+        """For an open session nothing is checking for: what its delivery mode should be doing, and isn't."""
+        mode = delivery.mode_for(self.delivery, name)
+        if mode == "listen":
+            return "; its delivery is listen, and no nanotea listen runs for it"
+        if mode == "push":
+            ran = self.pushed.get(_plain(name))
+            return ("; its delivery is push, and its push hook " + (f"last ran {pages.ago(ran)}" if ran else
+                    f"hasn't run since the service started {pages.ago(self.started)}: nanotea setup prints it"))
+        return ""
 
     def known_agents(self) -> dict[str, str]:
         """Every agent name the service knows, casefolded -> as written."""
@@ -3495,10 +3508,13 @@ class Handler(BaseHTTPRequestHandler):
         results, which are in neither total nor ids: they don't wake an agent. delivery: its mode ([delivery]);
         channels: those its sessions listen in. ?line=<segment> counts that inbox too, if it holds it; with &idle=1
         says the agent is idle and listening there (a wake hook waiting on its behalf), and with &listen=1 only
-        that something listens for it there (nanotea listen, while the agent may be at work)."""
+        that something listens for it there (nanotea listen, while the agent may be at work). &push=1: the push
+        hook ran, which the line's presence reports."""
         if what == "answers":
             return self._json(200, self.app.answers(agent))
         idle, listening = query.get("idle", [""])[0] == "1", query.get("listen", [""])[0] == "1"
+        if query.get("push", [""])[0] == "1":
+            self.app.pushed[_plain(agent)] = now_iso()
         line: list[str] = []
         if seg := query.get("line", [""])[0]:
             box = box_of_segment(seg)

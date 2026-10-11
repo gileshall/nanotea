@@ -46,9 +46,10 @@ LISTENER_GRACE_S = 5  # longer than a listener's poll: what one takes in that ti
 HARNESSES = ("claude", "codex", "gemini", "vscode", "cursor")
 
 
-def waiting(client: Client, name: str, line: str, idle: bool = False, listen: bool = False) -> dict:
+def waiting(client: Client, name: str, line: str, idle: bool = False, listen: bool = False,
+            push: bool = False) -> dict:
     return client.get(f"/api/agents/{quote(name, safe='')}/waiting", line=segment(line), idle=1 if idle else None,
-                      listen=1 if listen else None)
+                      listen=1 if listen else None, push=1 if push else None)
 
 
 def note(owner: str, w: dict) -> str:
@@ -113,7 +114,7 @@ def push(client: Client, held: Held, owner: str, name: str, line: str) -> int:
     if not hook_event:
         raise ValueError("push reads the harness's hook event on stdin, and this one has no hook_event_name")
     held.clear(client, name)
-    w = waiting(client, name, line)
+    w = waiting(client, name, line, push=True)
     if w["delivery"] != "push" or not (w["total"] or w["bang"]):
         return 0
     items = Mailbox(client, name, line, w["channels"], f"push hook pid {os.getpid()}").take(False)
