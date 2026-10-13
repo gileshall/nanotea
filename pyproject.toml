@@ -7,10 +7,29 @@ requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Giles Hall", email = "giles@polymerase.org" }]
+keywords = ["mcp", "agents", "coding-agents", "claude-code", "codex", "voice", "messaging"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Communications :: Chat",
+    "Topic :: Software Development",
+]
 dependencies = [
     "mcp>=2.3",
     "pywebpush>=2.5.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/gileshall/nanotea"
+Documentation = "https://github.com/gileshall/nanotea/tree/main/docs"
+Issues = "https://github.com/gileshall/nanotea/issues"
+Source = "https://github.com/gileshall/nanotea"
 
 [project.optional-dependencies]
 # Runs the kokoro tts plugin in this process: uv sync --extra kokoro

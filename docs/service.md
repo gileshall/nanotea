@@ -140,7 +140,7 @@ docker compose exec nanotea nanotea pair-link   # open the link once on each pho
 
 ### Agents on the host
 
-Agents run `nanotea mcp`, hooks and `nanotea-tell` on the host, so the host needs the `nanotea` command (`uv tool install .`). They read the same config file for the port and the owner's name, and call the published port on `http://127.0.0.1:<port>`:
+Agents run `nanotea mcp`, hooks and `nanotea-tell` on the host, so the host needs the `nanotea` command (`uv tool install nanotea`). They read the same config file for the port and the owner's name, and call the published port on `http://127.0.0.1:<port>`:
 
 ```bash
 export NANOTEA_CONFIG=$PWD/docker-config/config.toml

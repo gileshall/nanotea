@@ -26,7 +26,7 @@ notifications come only to the Home Screen app, which needs https.
 ## Before any of them
 
 ```bash
-uv tool install .                 # from a clone; or pipx install .
+uv tool install nanotea           # or pipx install nanotea; from a clone, uv tool install .
 nanotea init                      # asks your name and the address; or --owner NAME --url URL
 nanotea plugins --check           # builds the voice, transcriber and rewriter; says what is missing
 nanotea serve                     # keep it running (launchd/ has a macOS template)
