@@ -32,7 +32,7 @@ Issues = "https://github.com/gileshall/nanotea/issues"
 Source = "https://github.com/gileshall/nanotea"
 
 [project.optional-dependencies]
-# Runs the kokoro tts plugin in this process: uv sync --extra kokoro
+# Runs the kokoro tts plugin in this process: uv tool install 'nanotea[kokoro]', or uv sync --extra kokoro
 kokoro = ["kokoro-onnx>=0.6.1"]
 
 [project.scripts]

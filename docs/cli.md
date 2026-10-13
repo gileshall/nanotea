@@ -184,11 +184,12 @@ the model, `kokoro-v1.0.onnx` (325,505,369 bytes), and its voices, `voices-v1.0.
 the [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.1) release `model-files-v1.1`.
 
 ```bash
-uv sync --extra kokoro          # the runtime (kokoro-onnx), from a checkout
+uv tool install 'nanotea[kokoro]'   # the runtime (kokoro-onnx); from a checkout, uv sync --extra kokoro
 nanotea kokoro download         # into [tts.kokoro] model_dir, else ~/.cache/nanotea/kokoro
 nanotea kokoro download --dir /srv/models/kokoro
 ```
 
+- `uv tool install` replaces the install's plugins and extras: add the `--with` flags it was installed with.
 - The files go in `--dir`, else `model_dir` in `[tts.kokoro]` (relative paths are the config's directory), else `$XDG_CACHE_HOME/nanotea/kokoro`, which is `~/.cache/nanotea/kokoro`. The cache is the default because the files are large and can be fetched again, so they don't belong in `data/`. The command says which directory it used.
 - Each file is checked against the size and SHA-256 of the release asset, then moved into place. A download that doesn't match is deleted and the command fails.
 - Running it again skips files that are already there and match.

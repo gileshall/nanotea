@@ -23,9 +23,20 @@ kept in memory: MCP servers register their sessions again after a restart.
 
 ## Upgrading
 
-Update the code, then restart the service (`launchctl kickstart -k gui/$(id -u)/<label>` under launchd, or
-`docker compose up -d --build`). The service's version is a hash of the package's files; it is in the start-up
-log line and in the `X-Nanotea-Version` header of every response.
+Update the code, then restart the service:
+
+```bash
+uv tool upgrade nanotea                       # installed by name; or pipx upgrade nanotea
+git pull && uv tool install --reinstall .     # installed from a clone; without --reinstall, uv keeps the old build
+git pull && uv sync                           # run from a checkout's .venv
+launchctl kickstart -k gui/$(id -u)/<label>   # then restart it, under launchd
+```
+
+`uv tool upgrade` keeps the plugins installed with `--with` and the extras, such as `[kokoro]`. `uv tool install`
+replaces them, so give them again: `uv tool install --reinstall '.[kokoro]' --with nanotea-piper`.
+
+Under Docker, `git pull && docker compose up -d --build` does both. The service's version is a hash of the
+package's files; it is in the start-up log line and in the `X-Nanotea-Version` header of every response.
 
 Agents' long-lived processes follow on their own once the service runs the new code:
 

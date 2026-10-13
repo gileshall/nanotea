@@ -321,4 +321,5 @@ use = ["choice", "checklist", "stars:Stars"]
 piper = "nanotea_piper:Piper"
 ```
 
-Install it beside nanotea (`uv tool install nanotea --with nanotea-piper`), then `backend = "piper"`.
+Install it beside nanotea (`uv tool install nanotea --with nanotea-piper`), then `backend = "piper"`. That replaces
+the install's other plugins and extras, so name them too ([service.md](service.md#upgrading)).
